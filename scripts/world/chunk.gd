@@ -119,8 +119,11 @@ func _build_batch(key: String) -> void:
 
 	# Per-district material variants keep one draw call per batch while still
 	# raising texture residency across the world.
-	if batch.category == "building" and batch.material_variant > 0:
+	if batch.category == "building":
 		mmi.material_override = _mat_lib.building_variant(batch.material_variant)
+	elif batch.category == "prop" or batch.category == "detail":
+		if not batch.meshes[0].begins_with("rock") and batch.meshes[0] != "boulder":
+			mmi.material_override = _mat_lib.prop_variant(batch.material_variant)
 
 	add_child(mmi)
 	_batch_nodes[key] = mmi
@@ -194,6 +197,19 @@ func set_category_density(category: String, fraction: float) -> void:
 func visible_instances() -> int:
 	var n: int = 0
 	for key: String in _batch_nodes.keys():
+		var mm: MultiMesh = (_batch_nodes[key] as MultiMeshInstance3D).multimesh
+		n += (mm.visible_instance_count if mm.visible_instance_count >= 0
+			else mm.instance_count)
+	return n
+
+
+## Building floor modules currently drawn, reported to the HUD so the urban
+## geometry load is visible as a number rather than a vibe.
+func visible_building_modules() -> int:
+	var n: int = 0
+	for key: String in _batch_nodes.keys():
+		if (data.batches[key] as InstanceBatch).category != "building":
+			continue
 		var mm: MultiMesh = (_batch_nodes[key] as MultiMeshInstance3D).multimesh
 		n += (mm.visible_instance_count if mm.visible_instance_count >= 0
 			else mm.instance_count)

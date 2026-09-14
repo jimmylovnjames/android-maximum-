@@ -16,10 +16,14 @@ const STAGES_STANDARD: Array[Dictionary] = [
 	{"name": "FOREST CANOPY", "seconds": 12.0, "stress": 1, "radius": 420.0, "autopilot": true},
 	{"name": "SETTLEMENT", "seconds": 12.0, "stress": 2, "radius": 820.0, "autopilot": true},
 	{"name": "TOWN TRAFFIC", "seconds": 14.0, "stress": 2, "radius": 1250.0, "autopilot": true},
-	{"name": "DENSE CITY", "seconds": 16.0, "stress": 3, "radius": 1800.0, "autopilot": true},
-	{"name": "INDUSTRIAL", "seconds": 16.0, "stress": 4, "radius": 2450.0, "autopilot": true},
-	{"name": "REDLINE ZONE", "seconds": 18.0, "stress": 4, "radius": 3100.0, "autopilot": true},
-	{"name": "MELTDOWN BURST", "seconds": 14.0, "stress": 5, "radius": 3100.0, "autopilot": true},
+	{"name": "DENSE CITY", "seconds": 16.0, "stress": 3, "radius": 1800.0, "autopilot": true,
+		"weather": 2},
+	{"name": "INDUSTRIAL", "seconds": 16.0, "stress": 4, "radius": 2450.0, "autopilot": true,
+		"weather": 3},
+	{"name": "REDLINE ZONE", "seconds": 18.0, "stress": 4, "radius": 3100.0, "autopilot": true,
+		"weather": 4},
+	{"name": "MELTDOWN BURST", "seconds": 14.0, "stress": 5, "radius": 3100.0,
+		"autopilot": true, "weather": 4},
 	{"name": "PHYSICS STORM", "seconds": 12.0, "stress": 5, "radius": 3100.0,
 		"autopilot": false, "physics_storm": true},
 ]
@@ -31,7 +35,7 @@ const STAGES_ENDURANCE: Array[Dictionary] = [
 	{"name": "SUSTAIN C / INDUSTRIAL", "seconds": 90.0, "stress": 4, "radius": 2450.0,
 		"autopilot": true},
 	{"name": "SUSTAIN D / REDLINE", "seconds": 90.0, "stress": 4, "radius": 3100.0,
-		"autopilot": true},
+		"autopilot": true, "weather": 4},
 	{"name": "COOLDOWN CHECK", "seconds": 40.0, "stress": 1, "radius": 300.0, "autopilot": true},
 ]
 
@@ -205,6 +209,8 @@ func _advance_stage() -> void:
 			driver.call("bench_teleport", float(s["radius"]))
 		if driver.has_method("bench_set_autopilot"):
 			driver.call("bench_set_autopilot", bool(s.get("autopilot", true)))
+		if driver.has_method("bench_set_weather"):
+			driver.call("bench_set_weather", int(s.get("weather", 2)))
 		if bool(s.get("physics_storm", false)) and driver.has_method("bench_physics_storm"):
 			driver.call("bench_physics_storm")
 

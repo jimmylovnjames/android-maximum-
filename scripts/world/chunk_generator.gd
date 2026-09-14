@@ -12,6 +12,50 @@ const MAX_MODULES_PER_CHUNK: int = 520
 const PERM_PRIME: int = 104729
 
 
+## Bilinear sampler over the chunk's already-computed height grid. Terrain
+## height is by far the most expensive function in the world (roughly ten noise
+## octaves per call), so scattering reads it from here instead of recomputing
+## it thousands of times per chunk.
+class ChunkField extends RefCounted:
+	var n: int = 0
+	var cell: float = 1.0
+	var ox: float = 0.0
+	var oz: float = 0.0
+	var heights: PackedFloat32Array
+
+	func _init(grid: PackedFloat32Array, side: int, cell_size: float,
+			origin_x: float, origin_z: float) -> void:
+		heights = grid
+		n = side
+		cell = cell_size
+		ox = origin_x
+		oz = origin_z
+
+	func h(wx: float, wz: float) -> float:
+		var fx: float = clampf((wx - ox) / cell, 0.0, float(n - 1))
+		var fz: float = clampf((wz - oz) / cell, 0.0, float(n - 1))
+		var i0: int = int(fx)
+		var j0: int = int(fz)
+		var i1: int = mini(i0 + 1, n - 1)
+		var j1: int = mini(j0 + 1, n - 1)
+		var tx: float = fx - float(i0)
+		var tz: float = fz - float(j0)
+		var h00: float = heights[j0 * n + i0]
+		var h10: float = heights[j0 * n + i1]
+		var h01: float = heights[j1 * n + i0]
+		var h11: float = heights[j1 * n + i1]
+		return lerpf(lerpf(h00, h10, tx), lerpf(h01, h11, tx), tz)
+
+	## 0 = flat, 1 = vertical. Derived from the grid, not from extra noise.
+	func slope(wx: float, wz: float) -> float:
+		var e: float = cell
+		var dx: float = h(wx + e, wz) - h(wx - e, wz)
+		var dz: float = wz
+		dz = h(wx, wz + e) - h(wx, wz - e)
+		var nrm := Vector3(-dx, 2.0 * e, -dz).normalized()
+		return 1.0 - clampf(nrm.y, 0.0, 1.0)
+
+
 ## Options: veg_step (float), collision (bool), lod_count (int),
 ## prop_richness (float 0..2), seed_salt (int).
 static func generate(gen: WorldGen, coord: Vector2i, opts: Dictionary) -> ChunkData:
@@ -36,9 +80,10 @@ static func generate(gen: WorldGen, coord: Vector2i, opts: Dictionary) -> ChunkD
 		var wz: float = d.origin.z + float(j) * CELL
 		for i in n:
 			var wx: float = d.origin.x + float(i) * CELL
-			var h: float = gen.height(wx, wz)
+			var u: float = gen.urban_factor(wx, wz)
+			var h: float = gen.height_u(wx, wz, u)
 			heights[j * n + i] = h
-			vcolors[j * n + i] = gen.terrain_color(wx, wz, h)
+			vcolors[j * n + i] = gen.terrain_color_u(wx, wz, h, u)
 			hmin = minf(hmin, h)
 			hmax = maxf(hmax, h)
 
@@ -51,12 +96,13 @@ static func generate(gen: WorldGen, coord: Vector2i, opts: Dictionary) -> ChunkD
 		d.terrain_lods.append(_terrain_surface(heights, vcolors, n, LOD_STEPS[l]))
 
 	if bool(opts.get("collision", false)):
-		d.collision_faces = _collision_faces(heights, n, 2)
+		d.collision_faces = _collision_faces_overlapped(gen, d, heights, n)
 
-	_scatter_vegetation(gen, d, opts)
-	_build_structures(gen, d, opts)
-	_scatter_props(gen, d, opts)
-	_place_spawns(gen, d, opts)
+	var field := ChunkField.new(heights, n, CELL, d.origin.x, d.origin.z)
+	_scatter_vegetation(gen, d, opts, field)
+	_build_structures(gen, d, opts, field)
+	_scatter_props(gen, d, opts, field)
+	_place_spawns(gen, d, opts, field)
 
 	d.gen_msec = float(Time.get_ticks_usec() - t0) / 1000.0
 	return d
@@ -71,15 +117,24 @@ static func _terrain_surface(heights: PackedFloat32Array, vcolors: PackedColorAr
 	var mb := MeshBuilder.new(true)
 	var idx := PackedInt32Array()
 	idx.resize(verts_side * verts_side)
+	var span: float = CELL * float(step)
 
 	for j in verts_side:
 		for i in verts_side:
 			var si: int = i * step
 			var sj: int = j * step
 			var h: float = heights[sj * n + si]
+			# Normals come straight from the height grid. Accumulating them
+			# per-triangle in script was the second-largest cost in chunk
+			# generation; central differences give the same result in O(verts).
+			var hl: float = heights[sj * n + maxi(si - step, 0)]
+			var hr: float = heights[sj * n + mini(si + step, n - 1)]
+			var hd: float = heights[maxi(sj - step, 0) * n + si]
+			var hu: float = heights[mini(sj + step, n - 1) * n + si]
+			var nrm := Vector3(hl - hr, 2.0 * span, hd - hu).normalized()
 			var p := Vector3(float(si) * CELL, h, float(sj) * CELL)
 			idx[j * verts_side + i] = mb.add_vertex(
-				p, Vector3.UP,
+				p, nrm,
 				Vector2(float(si) / float(n - 1), float(sj) / float(n - 1)),
 				vcolors[sj * n + si]
 			)
@@ -93,26 +148,8 @@ static func _terrain_surface(heights: PackedFloat32Array, vcolors: PackedColorAr
 			mb.add_triangle(a, c, b)
 			mb.add_triangle(a, e, c)
 
-	_recompute_normals(mb)
 	_add_skirt(mb, idx, verts_side)
 	return mb.to_arrays()
-
-
-static func _recompute_normals(mb: MeshBuilder) -> void:
-	var acc := PackedVector3Array()
-	acc.resize(mb.verts.size())
-	var tri: int = mb.indices.size() / 3
-	for t in tri:
-		var i0: int = mb.indices[t * 3]
-		var i1: int = mb.indices[t * 3 + 1]
-		var i2: int = mb.indices[t * 3 + 2]
-		var nrm: Vector3 = (mb.verts[i1] - mb.verts[i0]).cross(mb.verts[i2] - mb.verts[i0])
-		acc[i0] += nrm
-		acc[i1] += nrm
-		acc[i2] += nrm
-	for i in acc.size():
-		var v: Vector3 = acc[i]
-		mb.normals[i] = v.normalized() if v.length_squared() > 1e-12 else Vector3.UP
 
 
 ## Vertical apron around the chunk edge. Hides the seam where a neighbouring
@@ -150,33 +187,59 @@ static func _add_skirt(mb: MeshBuilder, idx: PackedInt32Array, side: int) -> voi
 			var i1: int = mb.add_vertex(pb, nrm, Vector2(1, 0), ca * 0.8)
 			var i2: int = mb.add_vertex(db, nrm, Vector2(1, 1), ca * 0.55)
 			var i3: int = mb.add_vertex(da, nrm, Vector2(0, 1), ca * 0.55)
+			# Outward-facing only; the apron is never seen from inside the chunk.
 			mb.add_triangle(i0, i1, i2)
 			mb.add_triangle(i0, i2, i3)
-			mb.add_triangle(i2, i1, i0)
-			mb.add_triangle(i3, i2, i0)
 
 
-static func _collision_faces(heights: PackedFloat32Array, n: int, step: int) -> PackedVector3Array:
-	var side: int = (n - 1) / step + 1
+## Collision surface, built one cell wider than the chunk on every side.
+##
+## ConcavePolygonShape3D is a triangle soup with no adjacency information, so a
+## capsule standing exactly on the outer edge of one chunk's mesh reports the
+## perimeter edge normal -- an axis-aligned vertical "wall" -- instead of the
+## ground. Overlapping neighbouring chunks by one cell means the capsule is
+## always in the interior of at least one mesh. The border ring is sampled from
+## the same analytic height function, so the overlapping surfaces coincide
+## exactly.
+static func _collision_faces_overlapped(gen: WorldGen, d: ChunkData,
+		heights: PackedFloat32Array, n: int) -> PackedVector3Array:
+	var side: int = n + 2
+	var grid := PackedFloat32Array()
+	grid.resize(side * side)
+	for j in side:
+		var lj: int = j - 1
+		for i in side:
+			var li: int = i - 1
+			if li >= 0 and li < n and lj >= 0 and lj < n:
+				grid[j * side + i] = heights[lj * n + li]
+			else:
+				var wx: float = d.origin.x + float(li) * CELL
+				var wz: float = d.origin.z + float(lj) * CELL
+				grid[j * side + i] = gen.height(wx, wz)
+
 	var faces := PackedVector3Array()
 	faces.resize((side - 1) * (side - 1) * 6)
 	var w: int = 0
 	for j in side - 1:
+		var z0: float = float(j - 1) * CELL
+		var z1: float = float(j) * CELL
 		for i in side - 1:
-			var x0: float = float(i * step) * CELL
-			var x1: float = float((i + 1) * step) * CELL
-			var z0: float = float(j * step) * CELL
-			var z1: float = float((j + 1) * step) * CELL
-			var h00: float = heights[(j * step) * n + i * step]
-			var h10: float = heights[(j * step) * n + (i + 1) * step]
-			var h11: float = heights[((j + 1) * step) * n + (i + 1) * step]
-			var h01: float = heights[((j + 1) * step) * n + i * step]
+			var x0: float = float(i - 1) * CELL
+			var x1: float = float(i) * CELL
+			var h00: float = grid[j * side + i]
+			var h10: float = grid[j * side + i + 1]
+			var h11: float = grid[(j + 1) * side + i + 1]
+			var h01: float = grid[(j + 1) * side + i]
+			# Clockwise seen from above: ConcavePolygonShape3D is one-sided and
+			# uses the same front-face convention as the renderer, so the
+			# reversed order would give a surface you fall through from above
+			# and land on from underneath.
 			faces[w] = Vector3(x0, h00, z0); w += 1
-			faces[w] = Vector3(x1, h11, z1); w += 1
 			faces[w] = Vector3(x1, h10, z0); w += 1
-			faces[w] = Vector3(x0, h00, z0); w += 1
-			faces[w] = Vector3(x0, h01, z1); w += 1
 			faces[w] = Vector3(x1, h11, z1); w += 1
+			faces[w] = Vector3(x0, h00, z0); w += 1
+			faces[w] = Vector3(x1, h11, z1); w += 1
+			faces[w] = Vector3(x0, h01, z1); w += 1
 	return faces
 
 
@@ -204,7 +267,8 @@ static func _batch(d: ChunkData, key: String, lods: PackedStringArray, cat: Stri
 # -----------------------------------------------------------------------------
 # Vegetation
 # -----------------------------------------------------------------------------
-static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void:
+static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
+		field: ChunkField) -> void:
 	var richness: float = float(opts.get("prop_richness", 1.0))
 	var ox: float = d.origin.x
 	var oz: float = d.origin.z
@@ -226,12 +290,12 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary) -
 			0.0, gstep)
 		var wx: float = ox + float(gi) * gstep + jx
 		var wz: float = oz + float(gj) * gstep + jz
-		var dens: float = gen.grass_density(wx, wz)
+		var dens: float = gen.grass_density_at(wx, wz, field.h(wx, wz), field.slope(wx, wz))
 		if dens <= 0.02:
 			continue
 		if WorldGen.hash_f(int(wx * 8.0), int(wz * 8.0), 13) > dens:
 			continue
-		var h: float = gen.height(wx, wz)
+		var h: float = field.h(wx, wz)
 		var s: float = WorldGen.hash_range(int(wx * 4.0), int(wz * 4.0), 14, 0.7, 1.45)
 		var tint: float = WorldGen.hash_range(int(wx * 4.0), int(wz * 4.0), 15, 0.75, 1.2)
 		grass.add_simple(
@@ -263,15 +327,16 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary) -
 			d.coord.x * 977 + ti, d.coord.y * 977 + tj, 21, 0.3, tstep - 0.3)
 		var bz: float = oz + float(tj) * tstep + WorldGen.hash_range(
 			d.coord.x * 977 + ti, d.coord.y * 977 + tj, 22, 0.3, tstep - 0.3)
-		var td: float = gen.tree_density(bx, bz)
+		var bh: float = field.h(bx, bz)
+		var td: float = gen.tree_density_at(bx, bz, bh)
 		if td <= 0.01:
 			continue
 		var roll: float = WorldGen.hash_f(int(bx * 2.0), int(bz * 2.0), 23)
 		if roll > td:
 			continue
-		if gen.slope_at(bx, bz) > 0.55:
+		if field.slope(bx, bz) > 0.55:
 			continue
-		var th: float = gen.height(bx, bz)
+		var th: float = bh
 		var yaw: float = WorldGen.hash_range(int(bx), int(bz), 24, 0.0, TAU)
 		var sc: float = WorldGen.hash_range(int(bx), int(bz), 25, 0.78, 1.5)
 		var wind: float = WorldGen.hash_f(int(bx), int(bz), 26)
@@ -294,7 +359,7 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary) -
 				var ux: float = bx + WorldGen.hash_range(int(bx), int(bz) + u, 29, -2.4, 2.4)
 				var uz: float = bz + WorldGen.hash_range(int(bx) + u, int(bz), 30, -2.4, 2.4)
 				bush.add_simple(
-					Vector3(ux - ox, gen.height(ux, uz), uz - oz),
+					Vector3(ux - ox, field.h(ux, uz), uz - oz),
 					WorldGen.hash_range(int(ux), int(uz), 31, 0.0, TAU),
 					Vector3.ONE * WorldGen.hash_range(int(ux), int(uz), 32, 0.6, 1.3),
 					Color(0.8, 1.0, 0.75, 1.0),
@@ -305,7 +370,8 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary) -
 # -----------------------------------------------------------------------------
 # Buildings and roads
 # -----------------------------------------------------------------------------
-static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void:
+static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
+		field: ChunkField) -> void:
 	var ox: float = d.origin.x
 	var oz: float = d.origin.z
 	var variant: int = int(absi(d.coord.x * 31 + d.coord.y * 17))
@@ -346,7 +412,7 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary) -> 
 			if module_count + floors + 1 > MAX_MODULES_PER_CHUNK:
 				continue
 
-			var base_y: float = gen.height(cx, cz) - 0.4
+			var base_y: float = field.h(cx, cz) - 0.4
 			var seed_f: float = WorldGen.hash_f(int(cx), int(cz), 45)
 			var grey: float = WorldGen.hash_range(int(cx), int(cz), 46, 0.30, 0.62)
 			var warm: float = WorldGen.hash_range(int(cx), int(cz), 47, 0.9, 1.12)
@@ -418,15 +484,15 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary) -> 
 				continue
 			if not gen.on_road(rp.x, rp.z):
 				continue
-			var y: float = gen.height(rp.x, rp.z)
+			var y: float = field.h(rp.x, rp.z)
 			if s % 3 == 0:
 				var side: float = 1.0 if (s % 6 == 0) else -1.0
 				var lx: float = rp.x + (0.0 if axis == 0 else side * 7.2)
 				var lz: float = rp.z + (side * 7.2 if axis == 0 else 0.0)
-				lamps.add_simple(Vector3(lx - ox, gen.height(lx, lz), lz - oz),
+				lamps.add_simple(Vector3(lx - ox, field.h(lx, lz), lz - oz),
 					(0.0 if axis == 0 else PI * 0.5) + (0.0 if side > 0.0 else PI),
 					Vector3.ONE, Color(0.3, 0.31, 0.33), Color(0.0, 0.0, 0.35, 0.0))
-				d.light_spots.push_back(Vector3(lx, gen.height(lx, lz) + 6.0, lz))
+				d.light_spots.push_back(Vector3(lx, field.h(lx, lz) + 6.0, lz))
 			if s % 2 == 0:
 				marks.add_simple(Vector3(rp.x - ox, y + 0.04, rp.z - oz),
 					0.0 if axis == 0 else PI * 0.5, Vector3.ONE,
@@ -436,7 +502,8 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary) -> 
 # -----------------------------------------------------------------------------
 # Props
 # -----------------------------------------------------------------------------
-static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void:
+static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary,
+		field: ChunkField) -> void:
 	var richness: float = float(opts.get("prop_richness", 1.0))
 	var ox: float = d.origin.x
 	var oz: float = d.origin.z
@@ -474,7 +541,7 @@ static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary) -> voi
 			d.coord.x * 61 + i, d.coord.y * 61 + j, 61)) * step
 		var wz: float = oz + (float(j) + WorldGen.hash_f(
 			d.coord.x * 67 + i, d.coord.y * 67 + j, 62)) * step
-		var h: float = gen.height(wx, wz)
+		var h: float = field.h(wx, wz)
 		if h < GameConfig.WATER_LEVEL:
 			continue
 		var zone: int = gen.zone_at(wx, wz)
@@ -535,7 +602,8 @@ static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary) -> voi
 # -----------------------------------------------------------------------------
 # Gameplay seeds
 # -----------------------------------------------------------------------------
-static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void:
+static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary,
+		field: ChunkField) -> void:
 	var ox: float = d.origin.x
 	var oz: float = d.origin.z
 	var zone: int = d.zone
@@ -548,7 +616,7 @@ static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void
 			GameConfig.CHUNK_SIZE - 4.0)
 		var pz: float = oz + WorldGen.hash_range(d.coord.x + i, d.coord.y, 82, 4.0,
 			GameConfig.CHUNK_SIZE - 4.0)
-		var h: float = gen.height(px, pz)
+		var h: float = field.h(px, pz)
 		if h < GameConfig.WATER_LEVEL + 0.5:
 			continue
 		d.npc_spawns.push_back(Vector3(px, h, pz))
@@ -562,7 +630,7 @@ static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void
 				GameConfig.CHUNK_SIZE - 3.0)
 			var ez: float = oz + WorldGen.hash_range(d.coord.x, d.coord.y + i * 3, 84, 3.0,
 				GameConfig.CHUNK_SIZE - 3.0)
-			var eh: float = gen.height(ex, ez)
+			var eh: float = field.h(ex, ez)
 			if eh < GameConfig.WATER_LEVEL + 0.5:
 				continue
 			d.enemy_spawns.push_back(Vector3(ex, eh, ez))
@@ -579,7 +647,7 @@ static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void
 				continue
 			if rp.z < oz or rp.z > oz + GameConfig.CHUNK_SIZE:
 				continue
-			d.vehicle_spawns.push_back(Vector3(rp.x, gen.height(rp.x, rp.z), rp.z))
+			d.vehicle_spawns.push_back(Vector3(rp.x, field.h(rp.x, rp.z), rp.z))
 
 	# Scavenge.
 	var pickup_rolls: int = 3
@@ -591,7 +659,7 @@ static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary) -> void
 			GameConfig.CHUNK_SIZE - 3.0)
 		var pz2: float = oz + WorldGen.hash_range(d.coord.x, d.coord.y + i * 5, 89, 3.0,
 			GameConfig.CHUNK_SIZE - 3.0)
-		var ph: float = gen.height(px2, pz2)
+		var ph: float = field.h(px2, pz2)
 		if ph < GameConfig.WATER_LEVEL + 0.4:
 			continue
 		var kind: String = "scrap"

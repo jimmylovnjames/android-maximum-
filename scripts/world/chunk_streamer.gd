@@ -144,11 +144,14 @@ func _publish_counters() -> void:
 	PerformanceMonitor.set_counter("chunk_cache_mb", cache_megabytes())
 	PerformanceMonitor.set_counter("stream_queue", pending_count())
 	var inst: int = 0
+	var buildings: int = 0
 	for c: Vector2i in active.keys():
 		var ch: WorldChunk = active[c]
 		if ch.realized:
 			inst += ch.visible_instances()
+			buildings += ch.visible_building_modules()
 	PerformanceMonitor.set_counter("multimesh_instances", inst)
+	PerformanceMonitor.set_counter("buildings", buildings)
 
 
 # -----------------------------------------------------------------------------

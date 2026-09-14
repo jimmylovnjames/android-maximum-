@@ -26,10 +26,10 @@ var n_scatter: FastNoiseLite
 
 func _init(seed_value: int) -> void:
 	world_seed = seed_value
-	n_base = _mk(seed_value + 1, 0.0016, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 5, 0.5, 2.0)
-	n_hill = _mk(seed_value + 2, 0.0062, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 4, 0.48, 2.1)
-	n_ridge = _mk(seed_value + 3, 0.0031, FastNoiseLite.TYPE_SIMPLEX, 4, 0.55, 2.2)
-	n_warp = _mk(seed_value + 4, 0.0009, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 2, 0.5, 2.0)
+	n_base = _mk(seed_value + 1, 0.0016, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 4, 0.5, 2.1)
+	n_hill = _mk(seed_value + 2, 0.0062, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 3, 0.48, 2.2)
+	n_ridge = _mk(seed_value + 3, 0.0031, FastNoiseLite.TYPE_SIMPLEX, 3, 0.55, 2.3)
+	n_warp = _mk(seed_value + 4, 0.0009, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 1, 0.5, 2.0)
 	n_moist = _mk(seed_value + 5, 0.0021, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 3, 0.5, 2.0)
 	n_district = _mk(seed_value + 6, 0.0035, FastNoiseLite.TYPE_CELLULAR, 1, 0.5, 2.0)
 	n_district.cellular_distance_function = FastNoiseLite.DISTANCE_EUCLIDEAN
@@ -98,15 +98,41 @@ func redline_factor(x: float, z: float) -> float:
 # -----------------------------------------------------------------------------
 # Terrain
 # -----------------------------------------------------------------------------
-## Large-scale plateau the urban grid is built on. Quantised per district so
-## roads and foundations line up instead of following the raw noise.
+## Large-scale plateau the urban grid is built on. Sampled at district centres
+## so roads and foundations sit on a common level, then blended between
+## neighbouring districts.
+##
+## This *must* stay continuous: a hard `floor()` quantisation puts a vertical
+## step in the terrain at every district boundary, which shows up as a seam in
+## the mesh and as an unclimbable wall in the collision trimesh.
 func district_height(x: float, z: float) -> float:
-	var cx: float = floor(x / DISTRICT_SIZE) * DISTRICT_SIZE + DISTRICT_SIZE * 0.5
-	var cz: float = floor(z / DISTRICT_SIZE) * DISTRICT_SIZE + DISTRICT_SIZE * 0.5
+	var fx: float = x / DISTRICT_SIZE - 0.5
+	var fz: float = z / DISTRICT_SIZE - 0.5
+	var i0: float = floor(fx)
+	var j0: float = floor(fz)
+	var tx: float = smoothstep(0.0, 1.0, fx - i0)
+	var tz: float = smoothstep(0.0, 1.0, fz - j0)
+	var h00: float = _district_sample(i0, j0)
+	var h10: float = _district_sample(i0 + 1.0, j0)
+	var h01: float = _district_sample(i0, j0 + 1.0)
+	var h11: float = _district_sample(i0 + 1.0, j0 + 1.0)
+	return lerpf(lerpf(h00, h10, tx), lerpf(h01, h11, tx), tz)
+
+
+func _district_sample(i: float, j: float) -> float:
+	var cx: float = (i + 0.5) * DISTRICT_SIZE
+	var cz: float = (j + 0.5) * DISTRICT_SIZE
 	return n_base.get_noise_2d(cx, cz) * 16.0 + 4.0
 
 
 func height(x: float, z: float) -> float:
+	return height_u(x, z, urban_factor(x, z))
+
+
+## Height with the urbanisation factor supplied by the caller. Chunk generation
+## samples `urban_factor` once per vertex and reuses it for both the height and
+## the biome tint, which removes several noise evaluations per vertex.
+func height_u(x: float, z: float, u: float) -> float:
 	var wx: float = x + n_warp.get_noise_2d(x, z) * 60.0
 	var wz: float = z + n_warp.get_noise_2d(x + 917.0, z - 311.0) * 60.0
 
@@ -117,20 +143,18 @@ func height(x: float, z: float) -> float:
 
 	var r: float = radius_at(x, z)
 	# Mountains belong to the outer wilderness/forest rim, not the city.
-	var relief: float = 1.0 - urban_factor(x, z)
+	var relief: float = 1.0 - u
 	var h: float = base * GameConfig.TERRAIN_AMPLITUDE
 	h += hill * 11.0 * relief
 	h += ridge * 26.0 * relief * clampf(r / 800.0, 0.15, 1.0)
 
-	var u: float = urban_factor(x, z)
 	if u > 0.001:
 		var plateau: float = district_height(x, z)
 		h = lerpf(h, plateau, smoothstep(0.0, 1.0, u) * 0.92)
-
-	# Roads carve a flat shoulder through whatever is left.
-	var rm: float = road_proximity(x, z)
-	if rm > 0.0 and u > 0.05:
-		h = lerpf(h, district_height(x, z) + 0.15, rm * u)
+		# Roads carve a flat shoulder through whatever is left.
+		var rm: float = road_proximity(x, z)
+		if rm > 0.0 and u > 0.05:
+			h = lerpf(h, plateau + 0.15, rm * u)
 
 	return h
 
@@ -184,8 +208,11 @@ func moisture(x: float, z: float) -> float:
 ## Vertex tint handed to the terrain shader. Keeping biome colour in the mesh
 ## means one terrain material covers the whole world.
 func terrain_color(x: float, z: float, h: float) -> Color:
+	return terrain_color_u(x, z, h, urban_factor(x, z))
+
+
+func terrain_color_u(x: float, z: float, h: float, u: float) -> Color:
 	var m: float = moisture(x, z)
-	var u: float = urban_factor(x, z)
 	var rl: float = redline_factor(x, z)
 
 	var dry := Color(0.42, 0.40, 0.24)
@@ -214,10 +241,15 @@ func terrain_color(x: float, z: float, h: float) -> Color:
 # -----------------------------------------------------------------------------
 ## Trees per hectare-ish factor, 0..1.
 func tree_density(x: float, z: float) -> float:
+	return tree_density_at(x, z, height(x, z))
+
+
+## Height-provided variant. Chunk generation samples the height once into a
+## grid and reuses it here, which removes the dominant cost of world building.
+func tree_density_at(x: float, z: float, h: float) -> float:
 	var zone: int = zone_at(x, z)
 	var m: float = moisture(x, z)
 	var u: float = urban_factor(x, z)
-	var h: float = height(x, z)
 	if h < GameConfig.WATER_LEVEL + 0.5:
 		return 0.0
 	var base: float = 0.0
@@ -241,12 +273,14 @@ func tree_density(x: float, z: float) -> float:
 
 
 func grass_density(x: float, z: float) -> float:
-	var h: float = height(x, z)
+	return grass_density_at(x, z, height(x, z), slope_at(x, z))
+
+
+func grass_density_at(x: float, z: float, h: float, s: float) -> float:
 	if h < GameConfig.WATER_LEVEL + 0.3:
 		return 0.0
 	var u: float = urban_factor(x, z)
 	var m: float = moisture(x, z)
-	var s: float = slope_at(x, z)
 	return clampf((0.35 + m * 0.8) * (1.0 - u * 0.9) * (1.0 - s * 1.4), 0.0, 1.4)
 
 

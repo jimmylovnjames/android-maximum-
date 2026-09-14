@@ -8,6 +8,7 @@ extends CharacterBody3D
 
 signal fired(from: Vector3, to: Vector3, hit: bool)
 signal interacted(target: Node)
+signal stuck_recovered()
 
 const MOUSE_SENS: float = 0.0022
 const MAX_PITCH: float = 1.45
@@ -20,6 +21,8 @@ const WEAPON_RANGE: float = 220.0
 const FIRE_INTERVAL: float = 0.12
 const MELEE_INTERVAL: float = 0.55
 const BOB_FREQ: float = 9.0
+const TERMINAL_VELOCITY: float = 55.0
+const STUCK_SECONDS: float = 0.7
 
 var camera: Camera3D
 var head: Node3D
@@ -31,6 +34,12 @@ var autopilot: bool = false
 var autopilot_speed: float = 6.0
 var autopilot_radius: float = 60.0
 var autopilot_angle: float = 0.0
+## Marches radially outward instead of arcing at a fixed radius. The benchmark
+## wants the fixed arc (reproducible geometry); the streaming smoke test wants
+## the march, because only travelling across chunk boundaries exercises unload
+## and cache reuse.
+var autopilot_outward: bool = false
+var _autopilot_dodge: float = 0.0
 
 var _pitch: float = 0.0
 var _yaw: float = 0.0
@@ -51,12 +60,16 @@ var _muzzle_timer: float = 0.0
 var _sprinting: bool = false
 var _view_distance: float = 900.0
 var _spawn_protect: float = 1.5
+## Held in place until the chunk underneath has streamed in and has collision.
+## Without this the player free-falls through a world that does not exist yet.
+var frozen: bool = true
+var _stuck_timer: float = 0.0
 
 
 func _ready() -> void:
 	collision_layer = GameConfig.L_PLAYER
 	collision_mask = GameConfig.L_WORLD | GameConfig.L_DEBRIS | GameConfig.L_VEHICLE
-	floor_max_angle = deg_to_rad(52.0)
+	floor_max_angle = deg_to_rad(60.0)
 	floor_snap_length = 0.4
 	slide_on_ceiling = true
 
@@ -155,6 +168,10 @@ func _apply_look(delta_deg: Vector2) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if frozen:
+		velocity = Vector3.ZERO
+		_last_pos = global_position
+		return
 	if _spawn_protect > 0.0:
 		_spawn_protect -= delta
 
@@ -168,7 +185,11 @@ func _physics_process(delta: float) -> void:
 		_coyote = COYOTE_TIME
 	else:
 		_coyote = maxf(0.0, _coyote - delta)
-		velocity.y -= 22.0 * delta
+		# Terminal velocity matters here: without it a player wedged against a
+		# steep collision face accumulates hundreds of m/s of downward motion,
+		# and the resulting per-step sweep gets large enough that the solver
+		# reports "stuck" and stops moving them at all.
+		velocity.y = maxf(velocity.y - 22.0 * delta, -TERMINAL_VELOCITY)
 
 	var intent: Vector2 = _movement_intent()
 	var wants_sprint: bool = _wants_sprint() and intent.length_squared() > 0.05
@@ -206,14 +227,38 @@ func _physics_process(delta: float) -> void:
 		GameConfig.PLAYER_CROUCH_EYE_HEIGHT if _crouching else GameConfig.PLAYER_EYE_HEIGHT,
 		clampf(delta * 12.0, 0.0, 1.0))
 
+	_check_stuck(delta, on_floor, intent)
 	_update_view(delta, on_floor)
 	_update_vitals(delta)
 	_update_combat(delta)
 
-	var moved: float = global_position.distance_to(_last_pos)
-	if moved > 0.01:
+	# Horizontal only: vertical settling against a streamed trimesh would
+	# otherwise inflate the distance statistic by hundreds of metres.
+	var moved: float = Vector2(
+		global_position.x - _last_pos.x, global_position.z - _last_pos.z).length()
+	if moved > 0.004:
 		GameState.register_travel(moved, global_position)
-		_last_pos = global_position
+	_last_pos = global_position
+
+
+## A streamed procedural world can always produce a pocket the character
+## controller cannot resolve. If the player is airborne, pressing into a
+## surface and going nowhere, lift them back out instead of leaving them
+## wedged there for the rest of the run.
+func _check_stuck(delta: float, on_floor: bool, intent: Vector2) -> void:
+	var horizontal: float = Vector2(velocity.x, velocity.z).length()
+	var moved: float = Vector2(
+		global_position.x - _last_pos.x, global_position.z - _last_pos.z).length()
+	if on_floor or (moved > 0.008 and horizontal > 0.2) or intent.length_squared() < 0.01:
+		_stuck_timer = 0.0
+		return
+	_stuck_timer += delta
+	if _stuck_timer < STUCK_SECONDS:
+		return
+	_stuck_timer = 0.0
+	velocity.y = 0.0
+	global_position.y += 1.2
+	stuck_recovered.emit()
 
 
 func _gather_look(delta: float) -> void:
@@ -431,6 +476,16 @@ func teleport(pos: Vector3, face_yaw: float = 0.0) -> void:
 	rotation.y = _yaw
 	_last_pos = pos
 	_spawn_protect = 1.5
+	frozen = true
+
+
+## Safety net for a streamed world: if the player ends up well below the
+## procedural surface (tunnelling, or a chunk arriving late), put them back on
+## top of it rather than letting them fall out of the world.
+func ground_snap(ground_y: float, clearance: float = 1.2) -> void:
+	global_position.y = ground_y + clearance
+	velocity = Vector3.ZERO
+	_last_pos = global_position
 
 
 # -----------------------------------------------------------------------------
@@ -446,7 +501,23 @@ func set_autopilot(on: bool, radius: float = 60.0) -> void:
 
 func _autopilot_step(delta: float) -> void:
 	var r: float = maxf(20.0, Vector2(global_position.x, global_position.z).length())
-	autopilot_angle += (autopilot_speed / r) * delta
-	var tangent := Vector3(-sin(autopilot_angle), 0.0, cos(autopilot_angle))
-	_yaw = atan2(-tangent.x, -tangent.z)
+	var heading: Vector3
+	if autopilot_outward:
+		# Steer around anything the outward heading cannot climb. Without this
+		# the march walks into the first ridge it meets and stays there, which
+		# tells you nothing about streaming.
+		var planar: float = Vector2(velocity.x, velocity.z).length()
+		if planar < 1.2:
+			_autopilot_dodge += delta * 1.3
+		else:
+			_autopilot_dodge = move_toward(_autopilot_dodge, 0.0, delta * 0.6)
+		var out := Vector2(global_position.x, global_position.z)
+		if out.length_squared() < 1.0:
+			out = Vector2(1.0, 0.35)
+		out = out.normalized().rotated(sin(_autopilot_dodge) * 1.15)
+		heading = Vector3(out.x, 0.0, out.y)
+	else:
+		autopilot_angle += (autopilot_speed / r) * delta
+		heading = Vector3(-sin(autopilot_angle), 0.0, cos(autopilot_angle))
+	_yaw = atan2(-heading.x, -heading.z)
 	_pitch = lerpf(_pitch, sin(Time.get_ticks_msec() * 0.0004) * 0.16, clampf(delta, 0.0, 1.0))

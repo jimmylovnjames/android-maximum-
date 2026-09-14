@@ -37,6 +37,12 @@ var tracer: StandardMaterial3D
 var wall_variants: Array[Texture2D] = []
 var surface_variants: Array[Texture2D] = []
 
+## Per-district material instances. Created once and updated in place so that
+## chunks realised before a quality change keep working -- replacing the
+## objects would leave live MeshInstances pointing at stale materials.
+var building_mats: Array[ShaderMaterial] = []
+var prop_mats: Array[ShaderMaterial] = []
+
 var _preset: int = -1
 var _tex_bytes: int = 0
 
@@ -72,6 +78,7 @@ func estimated_texture_mb() -> float:
 func rebuild(preset: int) -> void:
 	if preset == _preset and terrain != null:
 		return
+
 	_preset = preset
 	_tex_bytes = 0
 	var size: int = TextureLib.size_for_preset(preset)
@@ -107,13 +114,13 @@ func rebuild(preset: int) -> void:
 	_tex_bytes += 64 * 128 * 4 + 128 * 128 * 4
 
 	# --- Terrain -------------------------------------------------------------
-	terrain = _shader_mat(SH_TERRAIN)
+	terrain = _shader_mat(SH_TERRAIN, terrain)
 	terrain.set_shader_parameter("detail_tex", detail)
 	terrain.set_shader_parameter("macro_tex", macro)
 	terrain.set_shader_parameter("water_level", GameConfig.WATER_LEVEL)
 
 	# --- Vegetation ----------------------------------------------------------
-	grass = _shader_mat(SH_VEGETATION)
+	grass = _shader_mat(SH_VEGETATION, grass)
 	grass.set_shader_parameter("leaf_mask", grass_mask)
 	grass.set_shader_parameter("wind_strength", 0.55)
 	grass.set_shader_parameter("wind_speed", 2.1)
@@ -122,7 +129,7 @@ func rebuild(preset: int) -> void:
 	grass.set_shader_parameter("translucency", 0.45)
 	grass.set_shader_parameter("use_mask", true)
 
-	foliage = _shader_mat(SH_VEGETATION)
+	foliage = _shader_mat(SH_VEGETATION, foliage)
 	foliage.set_shader_parameter("leaf_mask", leaf_mask)
 	foliage.set_shader_parameter("wind_strength", 0.3)
 	foliage.set_shader_parameter("wind_speed", 1.1)
@@ -132,40 +139,43 @@ func rebuild(preset: int) -> void:
 	foliage.set_shader_parameter("use_mask", true)
 
 	# --- Buildings / props ---------------------------------------------------
-	building = _shader_mat(SH_BUILDING)
+	building = _shader_mat(SH_BUILDING, building)
 	building.set_shader_parameter("wall_tex", wall_variants[0])
 
-	prop = _shader_mat(SH_PROP)
+	prop = _shader_mat(SH_PROP, prop)
 	prop.set_shader_parameter("surface_tex", surface_variants[0])
 
 	# --- Water ---------------------------------------------------------------
-	water = _shader_mat(SH_WATER)
+	water = _shader_mat(SH_WATER, water)
 	water.set_shader_parameter("wave_normal", wave_n)
 
 	# --- Sky -----------------------------------------------------------------
-	sky_material = _shader_mat(SH_SKY)
+	sky_material = _shader_mat(SH_SKY, sky_material)
+
+	# --- Per-district variants ------------------------------------------------
+	_sync_variant_mats()
 
 	# --- Standard materials --------------------------------------------------
-	bark = _std(Color(0.25, 0.19, 0.14), 0.92, 0.0)
-	road = _std(Color(0.10, 0.10, 0.115), 0.86, 0.0)
-	metal = _std(Color(0.42, 0.44, 0.47), 0.42, 0.85)
-	flesh = _std(Color(0.42, 0.37, 0.33), 0.78, 0.0)
-	hostile = _std(Color(0.36, 0.09, 0.10), 0.6, 0.0)
+	bark = _std(Color(0.25, 0.19, 0.14), 0.92, 0.0, bark)
+	road = _std(Color(0.10, 0.10, 0.115), 0.86, 0.0, road)
+	metal = _std(Color(0.42, 0.44, 0.47), 0.42, 0.85, metal)
+	flesh = _std(Color(0.42, 0.37, 0.33), 0.78, 0.0, flesh)
+	hostile = _std(Color(0.36, 0.09, 0.10), 0.6, 0.0, hostile)
 	hostile.emission_enabled = true
 	hostile.emission = Color(1.0, 0.18, 0.12)
 	hostile.emission_energy_multiplier = 1.4
-	glass_emissive = _std(Color(0.05, 0.06, 0.08), 0.1, 0.4)
+	glass_emissive = _std(Color(0.05, 0.06, 0.08), 0.1, 0.4, glass_emissive)
 	glass_emissive.emission_enabled = true
 	glass_emissive.emission = Color(1.0, 0.78, 0.45)
 	glass_emissive.emission_energy_multiplier = 2.5
-	debris = _std(Color(0.34, 0.33, 0.31), 0.9, 0.0)
-	pickup = _std(Color(0.3, 0.8, 0.5), 0.35, 0.2)
+	debris = _std(Color(0.34, 0.33, 0.31), 0.9, 0.0, debris)
+	pickup = _std(Color(0.3, 0.8, 0.5), 0.35, 0.2, pickup)
 	pickup.emission_enabled = true
 	pickup.emission = Color(0.35, 1.0, 0.6)
 	pickup.emission_energy_multiplier = 1.8
-	vehicle_body = _std(Color(0.5, 0.5, 0.55), 0.32, 0.55)
-	vehicle_glass = _std(Color(0.08, 0.1, 0.13), 0.08, 0.3)
-	tracer = _std(Color(1.0, 0.85, 0.4), 0.4, 0.0)
+	vehicle_body = _std(Color(0.5, 0.5, 0.55), 0.32, 0.55, vehicle_body)
+	vehicle_glass = _std(Color(0.08, 0.1, 0.13), 0.08, 0.3, vehicle_glass)
+	tracer = _std(Color(1.0, 0.85, 0.4), 0.4, 0.0, tracer)
 	tracer.emission_enabled = true
 	tracer.emission = Color(1.0, 0.75, 0.3)
 	tracer.emission_energy_multiplier = 6.0
@@ -184,32 +194,50 @@ func surface_texture(i: int) -> Texture2D:
 	return surface_variants[abs(i) % surface_variants.size()]
 
 
-## Building/prop batches get their own material instance so each district can
-## sample a different generated wall texture -- more residency, one draw call
-## per batch either way.
+## Building/prop batches share a small ring of material instances, one per
+## generated wall texture: more texture residency, still one draw call per
+## batch, and updating a preset mutates these in place so chunks that are
+## already in the scene follow along.
 func building_variant(i: int) -> ShaderMaterial:
-	var m: ShaderMaterial = building.duplicate() as ShaderMaterial
-	m.set_shader_parameter("wall_tex", wall_texture(i))
-	return m
+	if building_mats.is_empty():
+		return building
+	return building_mats[absi(i) % building_mats.size()]
 
 
 func prop_variant(i: int) -> ShaderMaterial:
-	var m: ShaderMaterial = prop.duplicate() as ShaderMaterial
-	m.set_shader_parameter("surface_tex", surface_texture(i))
+	if prop_mats.is_empty():
+		return prop
+	return prop_mats[absi(i) % prop_mats.size()]
+
+
+func _sync_variant_mats() -> void:
+	var n: int = maxi(1, wall_variants.size())
+	while building_mats.size() < n:
+		building_mats.append(_shader_mat(SH_BUILDING, null))
+	while prop_mats.size() < n:
+		prop_mats.append(_shader_mat(SH_PROP, null))
+	for i in building_mats.size():
+		building_mats[i].set_shader_parameter("wall_tex", wall_texture(i))
+	for i in prop_mats.size():
+		prop_mats[i].set_shader_parameter("surface_tex", surface_texture(i))
+
+
+## Reuses the existing material object when there is one. Materials are handed
+## out by reference all over the world; swapping the object on a quality change
+## would strand every chunk already in the scene.
+func _shader_mat(path: String, existing: ShaderMaterial) -> ShaderMaterial:
+	var m: ShaderMaterial = existing if existing != null else ShaderMaterial.new()
+	if m.shader == null:
+		var sh: Shader = load(path) as Shader
+		if sh == null:
+			push_error("REDLINE: missing shader %s" % path)
+		m.shader = sh
 	return m
 
 
-func _shader_mat(path: String) -> ShaderMaterial:
-	var m := ShaderMaterial.new()
-	var sh: Shader = load(path) as Shader
-	if sh == null:
-		push_error("REDLINE: missing shader %s" % path)
-	m.shader = sh
-	return m
-
-
-func _std(albedo: Color, rough: float, metal_v: float) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
+func _std(albedo: Color, rough: float, metal_v: float,
+		existing: StandardMaterial3D = null) -> StandardMaterial3D:
+	var m: StandardMaterial3D = existing if existing != null else StandardMaterial3D.new()
 	m.albedo_color = albedo
 	m.roughness = rough
 	m.metallic = metal_v

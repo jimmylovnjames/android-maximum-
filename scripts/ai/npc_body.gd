@@ -49,6 +49,11 @@ func configure(mesh: Mesh, hostile: bool, scale_v: float, tint: Color) -> void:
 func set_visible_body(v: bool) -> void:
 	visible = v
 	_shape.disabled = not v
+	if not v:
+		# Parked out of the world so a disabled-but-present body can never
+		# interact with anything while it waits in the pool.
+		position = Vector3(0.0, -4000.0, 0.0)
+		velocity = Vector3.ZERO
 
 
 func drive(desired: Vector3, delta: float, gravity: float = 22.0) -> void:

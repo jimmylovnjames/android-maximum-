@@ -7,6 +7,9 @@ extends Node3D
 ## MELTDOWN-level physics storm is bounded no matter what the director asks for.
 
 const BODY_GROUPS: PackedStringArray = ["crate", "barrel", "debris"]
+## Parking spot for pooled bodies. A pooled body still has a collision shape,
+## so leaving it at the origin would wall the player into their own spawn.
+const PARK: Vector3 = Vector3(0.0, -4000.0, 0.0)
 const SLEEP_RECLAIM_DISTANCE: float = 130.0
 const STACK_SPACING: float = 0.84
 const IMPACT_POOL: int = 24
@@ -21,7 +24,7 @@ var stack_budget: int = 5
 var particle_budget: int = 2600
 var particle_systems_budget: int = 12
 
-var _bodies: Array[RigidBody3D] = []
+var _bodies: Array[PropBody] = []
 var _body_free: Array[int] = []
 var _body_active: Array[int] = []
 var _body_kind: PackedInt32Array = PackedInt32Array()
@@ -104,9 +107,11 @@ func _ensure_pools() -> void:
 		_pickup_free.append(_pickups.size() - 1)
 
 
-func _make_body(i: int) -> RigidBody3D:
-	var rb := RigidBody3D.new()
+func _make_body(i: int) -> PropBody:
+	var rb := PropBody.new()
 	rb.name = "Prop%d" % i
+	rb.manager = self
+	rb.pool_index = i
 	rb.collision_layer = GameConfig.L_DEBRIS
 	rb.collision_mask = (GameConfig.L_WORLD | GameConfig.L_DEBRIS | GameConfig.L_PLAYER
 		| GameConfig.L_VEHICLE)
@@ -127,6 +132,9 @@ func _make_body(i: int) -> RigidBody3D:
 	rb.add_child(mi)
 	add_child(rb)
 	rb.visible = false
+	rb.position = PARK
+	rb.collision_layer = 0
+	rb.collision_mask = 0
 	return rb
 
 
@@ -160,6 +168,9 @@ func _make_projectile(i: int) -> RigidBody3D:
 	rb.add_child(mi)
 	add_child(rb)
 	rb.visible = false
+	rb.position = PARK
+	rb.collision_layer = 0
+	rb.collision_mask = 0
 	rb.body_entered.connect(_on_projectile_hit.bind(i))
 	return rb
 
@@ -235,7 +246,7 @@ func _acquire_body(kind: int) -> int:
 	if _body_free.is_empty():
 		return -1
 	var idx: int = _body_free.pop_back()
-	var rb: RigidBody3D = _bodies[idx]
+	var rb: PropBody = _bodies[idx]
 	var mi: MeshInstance3D = rb.get_node("Mesh")
 	var cs: CollisionShape3D = rb.get_node("Shape")
 	match kind:
@@ -255,7 +266,11 @@ func _acquire_body(kind: int) -> int:
 			cs.position = Vector3(0.0, 0.15, 0.0)
 			rb.mass = 5.0
 	_body_kind[idx] = kind
+	rb.arm(kind, idx)
 	rb.visible = true
+	rb.collision_layer = GameConfig.L_DEBRIS
+	rb.collision_mask = (GameConfig.L_WORLD | GameConfig.L_DEBRIS | GameConfig.L_PLAYER
+		| GameConfig.L_VEHICLE)
 	rb.freeze = false
 	rb.sleeping = false
 	_body_active.append(idx)
@@ -263,12 +278,15 @@ func _acquire_body(kind: int) -> int:
 
 
 func _release_body(idx: int) -> void:
-	var rb: RigidBody3D = _bodies[idx]
+	var rb: PropBody = _bodies[idx]
+	rb.destroyed = true
 	rb.freeze = true
 	rb.visible = false
 	rb.linear_velocity = Vector3.ZERO
 	rb.angular_velocity = Vector3.ZERO
-	rb.global_position = Vector3(0.0, -500.0, 0.0)
+	rb.collision_layer = 0
+	rb.collision_mask = 0
+	rb.global_position = PARK
 	_body_active.erase(idx)
 	_body_free.append(idx)
 
@@ -279,7 +297,7 @@ func spawn_prop(pos: Vector3, kind: int, impulse: Vector3 = Vector3.ZERO) -> int
 	var idx: int = _acquire_body(kind)
 	if idx < 0:
 		return -1
-	var rb: RigidBody3D = _bodies[idx]
+	var rb: PropBody = _bodies[idx]
 	rb.global_position = pos
 	rb.rotation = Vector3(0.0, _rng.randf() * TAU, 0.0)
 	rb.linear_velocity = impulse
@@ -354,6 +372,40 @@ func _on_pickup_collected(p: Pickup) -> void:
 		_pickup_free.append(idx)
 
 
+## Called by PropBody when its health runs out. Barrels chain-detonate, which
+## is the point of stacking them next to each other in the REDLINE zones.
+func destroy_prop(idx: int) -> void:
+	if idx < 0 or idx >= _bodies.size():
+		return
+	if not _body_active.has(idx):
+		return
+	var rb: PropBody = _bodies[idx]
+	var pos: Vector3 = rb.global_position
+	var was_explosive: bool = rb.explosive
+	_release_body(idx)
+	var shards: int = clampi(int(float(debris_budget) * 0.05), 2, 8)
+	for i in shards:
+		var dir := Vector3(
+			_rng.randf_range(-1.0, 1.0), _rng.randf_range(0.4, 1.2),
+			_rng.randf_range(-1.0, 1.0)).normalized()
+		spawn_prop(pos, 2, dir * _rng.randf_range(3.0, 8.0))
+	if was_explosive:
+		# Deferred so a chain reaction unwinds across frames instead of
+		# recursing through the whole stack inside one physics step.
+		call_deferred("detonate", pos, 11.0, 26.0, 55.0)
+	else:
+		_play_impact(pos, Color(0.75, 0.65, 0.5))
+
+
+## Particles actually emitting right now, for the HUD and benchmark counters.
+func active_particle_count() -> int:
+	var n: int = 0
+	for p: GPUParticles3D in _impacts:
+		if p.visible and p.emitting:
+			n += p.amount
+	return n
+
+
 # -----------------------------------------------------------------------------
 # Projectiles
 # -----------------------------------------------------------------------------
@@ -364,6 +416,9 @@ func launch_projectile(from: Vector3, velocity: Vector3, damage: float,
 	var idx: int = _proj_free.pop_back()
 	var rb: RigidBody3D = _projectiles[idx]
 	rb.global_position = from
+	rb.collision_layer = GameConfig.L_PROJECTILE
+	rb.collision_mask = (GameConfig.L_WORLD | GameConfig.L_DEBRIS | GameConfig.L_PLAYER
+		| GameConfig.L_ENEMY | GameConfig.L_NPC | GameConfig.L_VEHICLE)
 	rb.freeze = false
 	rb.visible = true
 	rb.linear_velocity = velocity
@@ -393,7 +448,9 @@ func _retire_projectile(idx: int) -> void:
 	rb.freeze = true
 	rb.visible = false
 	rb.linear_velocity = Vector3.ZERO
-	rb.global_position = Vector3(0.0, -500.0, 0.0)
+	rb.collision_layer = 0
+	rb.collision_mask = 0
+	rb.global_position = PARK
 	_proj_active.erase(idx)
 	if not _proj_free.has(idx):
 		_proj_free.append(idx)
@@ -408,7 +465,7 @@ func detonate(center: Vector3, radius: float, force: float, damage: float = 60.0
 	var r2: float = radius * radius
 	var affected: int = 0
 	for idx: int in _body_active.duplicate():
-		var rb: RigidBody3D = _bodies[idx]
+		var rb: PropBody = _bodies[idx]
 		var d2: float = rb.global_position.distance_squared_to(center)
 		if d2 > r2:
 			continue
@@ -506,10 +563,11 @@ func _maintain() -> void:
 	var pp: Vector3 = player.global_position
 
 	for idx: int in _body_active.duplicate():
-		var rb: RigidBody3D = _bodies[idx]
+		var rb: PropBody = _bodies[idx]
 		if rb.global_position.y < -140.0:
 			_release_body(idx)
 			continue
+
 		if rb.sleeping and rb.global_position.distance_to(pp) > SLEEP_RECLAIM_DISTANCE:
 			_release_body(idx)
 

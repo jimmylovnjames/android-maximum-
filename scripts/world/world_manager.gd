@@ -22,6 +22,7 @@ var weather: WeatherManager
 var npcs: NPCManager
 var traffic: TrafficManager
 var physics_stress: PhysicsStressManager
+var objectives: ObjectiveTracker
 var player: PlayerController
 var touch: TouchInput = null
 
@@ -95,6 +96,11 @@ func build(touch_layer: TouchInput) -> void:
 	weather.name = "WeatherManager"
 	add_child(weather)
 	weather.setup(mat_lib, player, day_night)
+
+	objectives = ObjectiveTracker.new()
+	objectives.name = "ObjectiveTracker"
+	add_child(objectives)
+	objectives.setup(self)
 
 	_build_water()
 	_build_light_pool()
@@ -204,6 +210,8 @@ func _process(delta: float) -> void:
 		_water.global_position = Vector3(
 			snappedf(pp.x, WATER_SNAP), GameConfig.WATER_LEVEL, snappedf(pp.z, WATER_SNAP))
 
+	_keep_player_on_ground(pp)
+
 	if traffic != null and day_night != null:
 		traffic.set_night(day_night.night_factor)
 
@@ -217,7 +225,25 @@ func _process(delta: float) -> void:
 		_zone_cd = 0.5
 		_update_zone(pp)
 
-	PerformanceMonitor.set_counter("particles", weather.particle_count() if weather != null else 0)
+	var particles: int = weather.particle_count() if weather != null else 0
+	if physics_stress != null:
+		particles += physics_stress.active_particle_count()
+	PerformanceMonitor.set_counter("particles", particles)
+
+
+## Releases the player once the ground beneath them exists, and catches the
+## case where they end up under the terrain anyway.
+func _keep_player_on_ground(pp: Vector3) -> void:
+	var gh: float = world_gen.height(pp.x, pp.z)
+	if player.frozen:
+		var c: Vector2i = ChunkStreamer.world_to_coord(pp)
+		var ch: WorldChunk = streamer.active.get(c, null)
+		if ch != null and ch.realized and ch.has_collision:
+			player.ground_snap(gh, 1.4)
+			player.frozen = false
+		return
+	if pp.y < gh - 6.0:
+		player.ground_snap(gh, 1.4)
 
 
 func _update_zone(pp: Vector3) -> void:
@@ -332,6 +358,8 @@ func respawn() -> void:
 	GameState.reset_run()
 	GameState.set_phase(GameState.Phase.PLAYING)
 	teleport_player(Vector3(0.0, 0.0, 0.0))
+	if objectives != null:
+		objectives.reset()
 	EventBus.notify("RESPAWNED AT ORIGIN", 3.0)
 
 
@@ -357,6 +385,11 @@ func bench_teleport(radius: float) -> void:
 	teleport_player(Vector3(cos(ang) * radius, 0.0, sin(ang) * radius))
 
 
+func bench_set_weather(state: int) -> void:
+	if weather != null:
+		weather.set_weather(state, false)
+
+
 func bench_set_autopilot(on: bool) -> void:
 	if player != null:
 		player.set_autopilot(on)
@@ -376,8 +409,55 @@ func bench_finish() -> void:
 		player.set_autopilot(false)
 
 
+## Diagnostic used by the headless smoke test: confirms the streamed collision
+## surface is actually present and correctly oriented under the player.
+func debug_probe() -> Dictionary:
+	if player == null or not is_instance_valid(player):
+		return {}
+	var pp: Vector3 = player.global_position
+	var c: Vector2i = ChunkStreamer.world_to_coord(pp)
+	var ch: WorldChunk = streamer.active.get(c, null)
+	var space: PhysicsDirectSpaceState3D = player.get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(
+		pp + Vector3(0, 12, 0), pp + Vector3(0, -40, 0))
+	q.collision_mask = GameConfig.L_WORLD
+	q.exclude = [player.get_rid()]
+	var hit: Dictionary = space.intersect_ray(q)
+	# A hit from below but not above means the collision trimesh is wound
+	# inside out, which is silent until the player falls through the world.
+	var q2 := PhysicsRayQueryParameters3D.create(
+		pp + Vector3(0, -40, 0), pp + Vector3(0, 12, 0))
+	q2.collision_mask = GameConfig.L_WORLD
+	q2.exclude = [player.get_rid()]
+	var hit_up: Dictionary = space.intersect_ray(q2)
+	return {
+		"ray_from_above_hits": not hit.is_empty(),
+		"ray_from_below_hits": not hit_up.is_empty(),
+		"on_floor": player.is_on_floor(),
+		"ground_analytic": world_gen.height(pp.x, pp.z),
+		"player_y": pp.y,
+		"chunk": [c.x, c.y],
+		"chunk_present": ch != null,
+		"chunk_realized": ch.realized if ch != null else false,
+		"chunk_has_collision": ch.has_collision if ch != null else false,
+		"faces": ch.data.collision_faces.size() if (ch != null and ch.data != null) else -1,
+		"ray_hit": [hit["position"].x, hit["position"].y, hit["position"].z]
+			if not hit.is_empty() else [],
+		"ray_normal": [hit["normal"].x, hit["normal"].y, hit["normal"].z]
+			if not hit.is_empty() else [],
+		"ray_collider": str(hit.get("collider", "")) if not hit.is_empty() else "",
+	}
+
+
 func world_stats() -> Dictionary:
 	return {
+		"player_pos": [player.global_position.x, player.global_position.y,
+			player.global_position.z] if player != null else [],
+		"ground_here": world_gen.height(player.global_position.x, player.global_position.z)
+			if player != null else 0.0,
+		"on_floor": player.is_on_floor() if player != null else false,
+		"velocity_h": Vector2(player.velocity.x, player.velocity.z).length()
+			if player != null else 0.0,
 		"zone": GameConfig.ZONE_NAMES[clampi(_current_zone, 0, 6)],
 		"radius": Vector2(player.global_position.x, player.global_position.z).length()
 			if player != null else 0.0,

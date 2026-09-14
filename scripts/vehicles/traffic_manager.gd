@@ -114,6 +114,10 @@ func _ensure_bodies(n: int) -> void:
 		b.add_child(mi)
 		add_child(b)
 		b.visible = false
+		# Parked well outside the world; a pooled body keeps its collision
+		# shape, and leaving it at the origin would trap the player on spawn.
+		b.position = Vector3(0.0, -4000.0, 0.0)
+		b.collision_layer = 0
 		_bodies.append(b)
 		_body_free.append(_bodies.size() - 1)
 
@@ -200,6 +204,7 @@ func _acquire_body(i: int) -> bool:
 	mat.vertex_color_use_as_albedo = true
 	mi.material_override = mat
 	b.visible = true
+	b.collision_layer = GameConfig.L_VEHICLE
 	_body_slot[i] = slot
 	return true
 
@@ -209,7 +214,8 @@ func _release_body(i: int) -> void:
 	if slot < 0:
 		return
 	_bodies[slot].visible = false
-	_bodies[slot].global_position = Vector3(0.0, -500.0, 0.0)
+	_bodies[slot].collision_layer = 0
+	_bodies[slot].global_position = Vector3(0.0, -4000.0, 0.0)
 	_body_free.append(slot)
 	_body_slot[i] = -1
 

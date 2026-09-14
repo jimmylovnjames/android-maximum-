@@ -50,10 +50,15 @@ func add_vertex(p: Vector3, n: Vector3, uv: Vector2, c: Color) -> int:
 	return i
 
 
+## Takes indices in counter-clockwise order as seen from the front face -- the
+## same order the cross products in this class use to derive normals -- and
+## stores them in the clockwise order Godot treats as front-facing. Doing the
+## conversion once, here, is why every emitter below can be written in the
+## natural mathematical order.
 func add_triangle(a: int, b: int, c: int) -> void:
 	indices.push_back(a)
-	indices.push_back(b)
 	indices.push_back(c)
+	indices.push_back(b)
 
 
 ## Adds a flat quad with an outward normal derived from the winding.
@@ -211,10 +216,11 @@ func add_cross_card(center: Vector3, width: float, height: float, col_bottom: Co
 		var i1: int = add_vertex(center + dir, n, Vector2(1.0, 1.0), col_bottom)
 		var i2: int = add_vertex(center + dir + Vector3.UP * height, n, Vector2(1.0, 0.0), col_top)
 		var i3: int = add_vertex(center - dir + Vector3.UP * height, n, Vector2(0.0, 0.0), col_top)
+		# Single-sided on purpose: the foliage shader renders with cull_disabled,
+		# so duplicating the back faces here would double the triangle count for
+		# no visual gain.
 		add_triangle(i0, i1, i2)
 		add_triangle(i0, i2, i3)
-		add_triangle(i2, i1, i0)
-		add_triangle(i3, i2, i0)
 
 
 ## Commits into `target` (creating a new ArrayMesh when null) as one surface.
