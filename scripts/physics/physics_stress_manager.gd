@@ -435,7 +435,7 @@ func _on_projectile_hit(body: Node, idx: int) -> void:
 	var rb: RigidBody3D = _projectiles[idx]
 	var pos: Vector3 = rb.global_position
 	if _proj_hostile[idx] == 1 and body is PlayerController:
-		(body as PlayerController).take_damage(_proj_damage[idx], self)
+		(body as PlayerController).take_damage(_proj_damage[idx], self, Vector3.UP, pos)
 	elif body != null and body.has_method("take_damage"):
 		body.call("take_damage", _proj_damage[idx], self, Vector3.UP)
 	_play_impact(pos, Color(0.9, 0.4, 1.0) if _proj_hostile[idx] == 1
@@ -482,7 +482,8 @@ func detonate(center: Vector3, radius: float, force: float, damage: float = 60.0
 	if player != null and is_instance_valid(player):
 		var pd: float = player.global_position.distance_to(center)
 		if pd < radius and player.has_method("take_damage"):
-			player.call("take_damage", damage * (1.0 - pd / radius) * 0.6, self)
+			player.call("take_damage", damage * (1.0 - pd / radius) * 0.6, self,
+				Vector3.UP, center)
 	_play_impact(center, Color(1.0, 0.55, 0.2), 2.4)
 	_flash(center, radius)
 

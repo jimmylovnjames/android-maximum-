@@ -42,12 +42,12 @@ func _build_banner() -> void:
 	_abort_button = UITheme.button("ABORT BENCHMARK", 12)
 	_abort_button.anchor_left = 0.5
 	_abort_button.anchor_right = 0.5
-	_abort_button.anchor_top = 0.0
-	_abort_button.anchor_bottom = 0.0
-	_abort_button.offset_left = -90.0
-	_abort_button.offset_right = 90.0
-	_abort_button.offset_top = 96.0
-	_abort_button.offset_bottom = 130.0
+	_abort_button.anchor_top = 1.0
+	_abort_button.anchor_bottom = 1.0
+	_abort_button.offset_left = -95.0
+	_abort_button.offset_right = 95.0
+	_abort_button.offset_top = -36.0
+	_abort_button.offset_bottom = -6.0
 	_abort_button.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_abort_button.visible = false
 	_abort_button.pressed.connect(func() -> void: BenchmarkManager.abort("user aborted"))
@@ -63,8 +63,11 @@ class _Banner extends Control:
 	var progress: float = 0.0
 
 	func _draw() -> void:
-		var w: float = minf(size.x - 80.0, 620.0)
-		var r := Rect2((size.x - w) * 0.5, 14.0, w, 76.0)
+		# Bottom-centre, not top: the expanded telemetry panel owns the top-left
+		# and the touch system row owns the top-right, and during a benchmark
+		# the gameplay HUD stands down so this space is free.
+		var w: float = minf(size.x - 80.0, 660.0)
+		var r := Rect2((size.x - w) * 0.5, size.y - 116.0, w, 76.0)
 		UITheme.draw_panel(self, r, UITheme.BG_SOLID, UITheme.EDGE)
 		UITheme.draw_brackets(self, r.grow(3.0), Color(1.0, 0.22, 0.18, 0.5), 16.0, 1.5)
 

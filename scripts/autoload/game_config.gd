@@ -95,12 +95,12 @@ func _register_shader_globals() -> void:
 
 
 func _global_float(name: String, value: float) -> void:
-	if RenderingServer.global_shader_parameter_get_list().has(StringName(name)):
-		RenderingServer.global_shader_parameter_set(name, value)
-		return
+	# global_shader_parameter_get_list() is editor-only and logs a performance
+	# error at runtime. Adding an existing global is harmless, so just add.
 	RenderingServer.global_shader_parameter_add(
 		name, RenderingServer.GLOBAL_VAR_TYPE_FLOAT, value
 	)
+	RenderingServer.global_shader_parameter_set(name, value)
 
 
 static func set_shader_global(name: String, value: Variant) -> void:

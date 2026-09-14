@@ -119,6 +119,9 @@ func _rebuild_layout() -> void:
 
 
 func _process(delta: float) -> void:
+	var benchmarking: bool = GameState.phase == GameState.Phase.BENCHMARK
+	if visible == benchmarking and _enabled:
+		visible = not benchmarking
 	if _look_hint > 0.0:
 		_look_hint -= delta
 		queue_redraw()

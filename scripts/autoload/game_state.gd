@@ -85,11 +85,12 @@ func is_invulnerable() -> bool:
 	return _invulnerable
 
 
-func damage(amount: float, source: String = "") -> void:
+func damage(amount: float, source: String = "",
+		from_position: Vector3 = Vector3.INF) -> void:
 	if phase != Phase.PLAYING or _invulnerable or amount <= 0.0:
 		return
 	health = maxf(0.0, health - amount)
-	EventBus.player_damaged.emit(amount, source)
+	EventBus.player_damaged.emit(amount, source, from_position)
 	vitals_changed.emit()
 	if health <= 0.0:
 		set_phase(Phase.DEAD)

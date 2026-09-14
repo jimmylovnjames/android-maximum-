@@ -10,7 +10,9 @@ signal zone_changed(zone_id: int, zone_name: String)
 
 # --- Player ------------------------------------------------------------------
 signal player_spawned(player: Node3D)
-signal player_damaged(amount: float, source: String)
+## `from_position` is Vector3.INF when the damage has no direction (falling,
+## integrity loss). The HUD only draws a direction arc when it has a real one.
+signal player_damaged(amount: float, source: String, from_position: Vector3)
 signal player_died()
 signal player_healed(amount: float)
 signal item_collected(item_id: String, amount: int)

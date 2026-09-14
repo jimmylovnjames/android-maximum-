@@ -463,10 +463,16 @@ func try_interact() -> void:
 			return
 
 
-func take_damage(amount: float, _source: Object = null, _normal: Vector3 = Vector3.UP) -> void:
+func take_damage(amount: float, source: Object = null, _normal: Vector3 = Vector3.UP,
+		from_position: Vector3 = Vector3.INF) -> void:
 	if _spawn_protect > 0.0:
 		return
-	GameState.damage(amount, "combat")
+	# Fall back to the source node's position so the HUD can point at whatever
+	# hit the player rather than inventing a direction.
+	var origin_pos: Vector3 = from_position
+	if origin_pos == Vector3.INF and source is Node3D:
+		origin_pos = (source as Node3D).global_position
+	GameState.damage(amount, "combat", origin_pos)
 
 
 func teleport(pos: Vector3, face_yaw: float = 0.0) -> void:

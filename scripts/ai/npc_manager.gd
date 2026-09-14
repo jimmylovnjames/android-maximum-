@@ -532,7 +532,8 @@ func _attack(i: int, pp: Vector3) -> void:
 		_cooldown[i] = 1.1
 		if player != null and player.has_method("take_damage"):
 			player.call("take_damage", 7.0 + float(
-				GameConfig.zone_for_position(_pos[i])) * 1.6, self)
+				GameConfig.zone_for_position(_pos[i])) * 1.6, self, Vector3.UP,
+				_pos[i])
 
 
 # -----------------------------------------------------------------------------

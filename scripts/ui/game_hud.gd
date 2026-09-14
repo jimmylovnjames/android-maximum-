@@ -107,12 +107,22 @@ func _on_zone(_id: int, zone_name: String) -> void:
 	_zone_timer = 3.6
 
 
-func _on_damaged(amount: float, _source: String) -> void:
+func _on_damaged(amount: float, _source: String, from_position: Vector3) -> void:
 	_flash = clampf(_flash + amount * 0.016, 0.0, 0.6)
-	var dir: float = 0.0
-	if player != null and is_instance_valid(player):
-		dir = randf_range(-PI, PI)
-	_damage_marks.push_back({"angle": dir, "life": 1.4, "power": clampf(amount / 30.0, 0.2, 1.0)})
+	if from_position == Vector3.INF or player == null or not is_instance_valid(player):
+		return      # No direction to show -- falling, or integrity running out.
+	# Screen-space bearing from the camera to whatever dealt the damage.
+	var cam: Camera3D = player.camera
+	if cam == null:
+		return
+	var local: Vector3 = cam.global_transform.affine_inverse() * from_position
+	if absf(local.x) < 0.0001 and absf(local.z) < 0.0001:
+		return
+	# Camera space is -Z forward, +X right; screen angle 0 points up.
+	var angle: float = atan2(local.x, -local.z) - PI * 0.5
+	_damage_marks.push_back({
+		"angle": angle, "life": 1.4, "power": clampf(amount / 30.0, 0.2, 1.0),
+	})
 
 
 func _on_fired(_from: Vector3, _to: Vector3, hit: bool) -> void:
@@ -177,6 +187,12 @@ func _probe_target() -> bool:
 # --- Draw ------------------------------------------------------------------
 func _draw() -> void:
 	var vs: Vector2 = size
+	# During a benchmark the player is on autopilot and invulnerable, and the
+	# telemetry is the point, so the gameplay furniture stands down and leaves
+	# the screen to the measurement overlay.
+	if GameState.phase == GameState.Phase.BENCHMARK:
+		_draw_reticle(vs)
+		return
 	_draw_damage_overlay(vs)
 	_draw_vitals(vs)
 	_draw_ammo(vs)

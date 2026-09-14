@@ -57,8 +57,12 @@ func setup(mat: MaterialLib) -> void:
 
 	sky = Sky.new()
 	sky.sky_material = _mat.sky_material
+	# Incremental rather than realtime: the sky has animated clouds and a
+	# moving sun, so the radiance map does need to update, but rebuilding it
+	# every frame is a cost a phone should not pay. Realtime also forces a
+	# 256px radiance map regardless of what is requested.
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
-	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
 
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_SKY
