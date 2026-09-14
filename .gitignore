@@ -1,0 +1,16 @@
+# Godot 4
+.godot/
+.import/
+export/
+build/
+*.tmp
+
+# Exported artifacts
+*.apk
+*.aab
+*.pck
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db
