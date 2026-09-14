@@ -56,6 +56,7 @@ Useful command line flags:
 | `--force-touch` | Show the touch layer on desktop |
 | `--godmode` | Invulnerable, for screenshots and long captures |
 | `--show-menu` | Boot to the title screen instead of straight into the world |
+| `--safety-off` | Development only: disables the low-FPS watchdog so the UI can be captured under a software renderer. Never set in a shipped build |
 | `--mesh-gallery` | Lay every procedural mesh out on a grid for inspection |
 | `--shots=a,b,c --shot-dir=DIR` | Save the framebuffer at those elapsed seconds |
 
@@ -276,16 +277,18 @@ tools/             Android export setup, debug keystore
 `tests/run_tests.sh` runs the whole suite headless:
 
 1. The project imports with no parser or autoload errors.
-2. Every script parses on its own (`--check-only`), which catches syntax errors
-   the whole-project import hides behind one "could not parse global class".
-3. `--selftest`: every generated mesh faces the same way as Godot's own
-   primitives, the chunk collision surface is hit from above and not from
-   below, the same seed produces identical chunks, and no stress level exceeds
-   a `GameConfig` cap.
-4. The world boots and streams.
-5. Travelling across chunk boundaries fills the retention cache.
-6. Sweeping every quality preset and stress level at runtime stays clean.
-7. A high stress level genuinely produces more work than a low one.
+2. `--selftest`, in one engine run with the autoloads live:
+   * every script in `scripts/` compiles — the whole-project import otherwise
+     collapses a syntax error anywhere into one "could not parse global class"
+     line that names no file;
+   * every generated mesh faces the same way as Godot's own primitives;
+   * the chunk collision surface is hit from above and not from below;
+   * the same seed produces identical chunks;
+   * no stress level exceeds a `GameConfig` cap.
+3. The world boots and streams.
+4. Travelling across chunk boundaries fills the retention cache.
+5. Sweeping every quality preset and stress level at runtime stays clean.
+6. A high stress level genuinely produces more work than a low one.
 
 Every assertion is made against JSON the engine itself produced.
 

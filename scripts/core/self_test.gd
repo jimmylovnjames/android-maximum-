@@ -121,6 +121,50 @@ static func _segment_hits(shape: Shape3D, from: Vector3, to: Vector3) -> bool:
 	return false
 
 
+## Loads every script in the project and reports the ones that fail to compile.
+##
+## The whole-project import collapses a syntax error anywhere into a single
+## "could not parse global class" line, which says nothing about where the
+## problem is. Doing it from inside a running instance means the autoloads
+## exist, so there are none of the false "identifier not found" failures that
+## `--check-only --script` produces -- and it is one process instead of one per
+## file.
+static func check_scripts(root: String = "res://scripts") -> Array:
+	var failures: Array = []
+	for path: String in _gd_files(root):
+		# Plain load(), not CACHE_MODE_IGNORE: forcing a reload of a script
+		# that is currently executing (this one included) recompiles it out
+		# from under the running instance and segfaults the engine.
+		var res: Resource = load(path)
+		if res == null:
+			failures.append({"script": path, "error": "failed to load"})
+			continue
+		if not (res is GDScript):
+			failures.append({"script": path, "error": "not a GDScript"})
+	return failures
+
+
+static func _gd_files(dir_path: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var d: DirAccess = DirAccess.open(dir_path)
+	if d == null:
+		return out
+	d.list_dir_begin()
+	var name: String = d.get_next()
+	while name != "":
+		if name.begins_with("."):
+			name = d.get_next()
+			continue
+		var full: String = dir_path.path_join(name)
+		if d.current_is_dir():
+			out.append_array(_gd_files(full))
+		elif name.ends_with(".gd"):
+			out.append(full)
+		name = d.get_next()
+	d.list_dir_end()
+	return out
+
+
 ## Determinism: the same seed and coordinate must produce identical chunks.
 static func check_determinism(seed_value: int) -> Array:
 	var failures: Array = []
@@ -170,6 +214,8 @@ static func check_safety_caps() -> Array:
 
 static func run_all(seed_value: int) -> Dictionary:
 	var results: Dictionary = {}
+	results["scripts"] = check_scripts()
+	results["script_count"] = _gd_files("res://scripts").size()
 	results["mesh_orientation"] = check_mesh_orientation()
 	results["collision_orientation"] = check_collision_orientation(WorldGen.new(seed_value))
 	results["determinism"] = check_determinism(seed_value)
@@ -178,7 +224,8 @@ static func run_all(seed_value: int) -> Dictionary:
 	results["safety_caps"] = check_safety_caps()
 	var total: int = 0
 	for k: String in results.keys():
-		total += (results[k] as Array).size()
+		if results[k] is Array:
+			total += (results[k] as Array).size()
 	results["failures"] = total
 	results["ok"] = total == 0
 	return results

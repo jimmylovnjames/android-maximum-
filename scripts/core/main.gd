@@ -39,6 +39,7 @@ var _selftest: bool = false
 var _mesh_gallery: bool = false
 var _godmode: bool = false
 var _show_menu: bool = false
+var _safety_off: bool = false
 
 
 func _ready() -> void:
@@ -89,6 +90,9 @@ func _ready() -> void:
 	main_menu.quit_requested.connect(_quit)
 
 	EventBus.safety_throttle.connect(_on_safety)
+	if _safety_off:
+		PerformanceMonitor.watchdog_enabled = false
+		push_warning("REDLINE: low-FPS safety watchdog disabled by --safety-off")
 	EventBus.benchmark_finished.connect(_on_benchmark_finished)
 	EventBus.benchmark_aborted.connect(_on_benchmark_aborted)
 	get_tree().auto_accept_quit = true
@@ -194,6 +198,11 @@ func _parse_cli() -> void:
 			_godmode = true
 		elif arg == "--show-menu":
 			_show_menu = true
+		elif arg == "--safety-off":
+			# Development only, for capturing the interface under a software
+			# renderer where the low-FPS watchdog would otherwise fire
+			# immediately. Never set in a shipped build.
+			_safety_off = true
 
 
 # -----------------------------------------------------------------------------

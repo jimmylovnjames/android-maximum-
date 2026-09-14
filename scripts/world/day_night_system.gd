@@ -92,13 +92,9 @@ func setup(mat: MaterialLib) -> void:
 	environment.glow_hdr_threshold = 0.95
 	environment.glow_hdr_scale = 2.0
 	# Weight the wider blur levels so bloom is a soft halo, not a hard ring.
-	environment.set_glow_level(1, 0.2)
-	environment.set_glow_level(2, 0.6)
-	environment.set_glow_level(3, 1.0)
-	environment.set_glow_level(4, 0.9)
-	environment.set_glow_level(5, 0.5)
-	environment.set_glow_level(6, 0.25)
-	environment.set_glow_level(7, 0.1)
+	# set_glow_level is zero-indexed; the inspector labels the same slots 1..7.
+	for i in 7:
+		environment.set_glow_level(i, [0.15, 0.4, 0.85, 1.0, 0.6, 0.3, 0.12][i])
 
 	# Film-style grade. Supported by the mobile renderer because it happens in
 	# the tonemap pass rather than as a separate screen-space effect.

@@ -53,6 +53,10 @@ var _accum: float = 0.0
 var _sample_interval: float = 0.1
 var _low_fps_timer: float = 0.0
 var _headless: bool = false
+## Development escape hatch (see main.gd --safety-off). The watchdog is what
+## forces a stress reduction after sustained single-digit frame rates; it is
+## on in every shipped configuration.
+var watchdog_enabled: bool = true
 
 ## Counters published by the gameplay managers each frame. PerformanceMonitor
 ## does not compute these, it only aggregates them for the HUD/benchmark.
@@ -110,7 +114,7 @@ func _process(delta: float) -> void:
 	frame_ms_long.push(frame_ms)
 
 	# Safety watchdog: sustained single-digit framerate forces a de-escalation.
-	if smoothed_fps < GameConfig.SAFETY_FPS_FLOOR:
+	if watchdog_enabled and smoothed_fps < GameConfig.SAFETY_FPS_FLOOR:
 		_low_fps_timer += delta
 		if _low_fps_timer >= GameConfig.SAFETY_FPS_FLOOR_SECONDS:
 			_low_fps_timer = 0.0
