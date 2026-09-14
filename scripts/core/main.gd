@@ -25,6 +25,9 @@ var _errors: Array[String] = []
 var _started: bool = false
 var _test_autopilot: bool = false
 var _test_travel: bool = false
+var _test_sweep: bool = false
+var _sweep_timer: float = 0.0
+var _sweep_step: int = 0
 
 
 func _ready() -> void:
@@ -98,6 +101,8 @@ func _parse_cli() -> void:
 		elif arg == "--test-travel":
 			_test_autopilot = true
 			_test_travel = true
+		elif arg == "--test-sweep":
+			_test_sweep = true
 
 
 # -----------------------------------------------------------------------------
@@ -247,10 +252,36 @@ func _unhandled_input(_event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if GameState.phase == GameState.Phase.DEAD and _started and not get_tree().paused:
 		_handle_death()
+	if _test_sweep:
+		_run_sweep(delta)
 	if _test_seconds > 0.0:
 		_test_elapsed += delta
 		if _test_elapsed >= _test_seconds:
 			_finish_test_run()
+
+
+## Cycles every quality preset and every stress level while the world is live.
+## This is where regressions in material rebuilds, cache invalidation and
+## budget re-application show up.
+func _run_sweep(delta: float) -> void:
+	_sweep_timer += delta
+	if _sweep_timer < 2.5:
+		return
+	_sweep_timer = 0.0
+	var presets: int = AdaptiveQualityManager.PRESET_NAMES.size()
+	var levels: int = StressDirector.LEVEL_NAMES.size()
+	if _sweep_step < presets:
+		AdaptiveQualityManager.apply_preset(_sweep_step, false)
+	elif _sweep_step < presets + levels:
+		StressDirector.set_level(_sweep_step - presets, false)
+	elif _sweep_step == presets + levels:
+		GameConfig.settings["high_memory_mode"] = true
+		StressDirector._recompute()
+	elif _sweep_step == presets + levels + 1:
+		StressDirector.set_auto(true)
+	else:
+		_sweep_step = -1
+	_sweep_step += 1
 
 
 var _death_timer: float = 0.0
