@@ -6,6 +6,13 @@ extends RefCounted
 ##
 ## Only PackedArrays are touched, so an instance of this class is safe to build
 ## off the main thread; the ArrayMesh itself is created on the main thread.
+##
+## Winding convention: every emitter here supplies vertices counter-clockwise
+## as seen from the front face, matching the cross products used to derive
+## normals. add_triangle() converts to the clockwise order Godot treats as
+## front-facing. Getting this wrong is silent -- meshes render inside out and
+## collision surfaces can only be hit from underneath -- so tests/ has a
+## geometry orientation check that runs over every generated mesh.
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -85,11 +92,11 @@ func add_box(origin: Vector3, size: Vector3, col: Color, uv_scale: float = 1.0) 
 	var y1: float = origin.y + size.y
 	var z1: float = origin.z + size.z
 	# +Y
-	add_quad(Vector3(x0, y1, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1),
-		Vector3(x0, y1, z1), col, uv_scale)
+	add_quad(Vector3(x0, y1, z1), Vector3(x1, y1, z1), Vector3(x1, y1, z0),
+		Vector3(x0, y1, z0), col, uv_scale)
 	# -Y
-	add_quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y0, z0),
-		Vector3(x0, y0, z0), col * 0.72, uv_scale)
+	add_quad(Vector3(x0, y0, z0), Vector3(x1, y0, z0), Vector3(x1, y0, z1),
+		Vector3(x0, y0, z1), col * 0.72, uv_scale)
 	# +Z
 	add_quad(Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y1, z1),
 		Vector3(x0, y1, z1), col * 0.92, uv_scale)
@@ -116,8 +123,8 @@ func add_box_xform(xform: Transform3D, size: Vector3, col: Color) -> void:
 	var p: Array[Vector3] = []
 	for c: Vector3 in corners:
 		p.append(xform * c)
-	add_quad(p[4], p[5], p[6], p[7], col)
-	add_quad(p[3], p[2], p[1], p[0], col * 0.72)
+	add_quad(p[7], p[6], p[5], p[4], col)
+	add_quad(p[0], p[1], p[2], p[3], col * 0.72)
 	add_quad(p[3], p[2], p[6], p[7], col * 0.92)
 	add_quad(p[1], p[0], p[4], p[5], col * 0.88)
 	add_quad(p[2], p[1], p[5], p[6], col * 0.96)
@@ -126,7 +133,8 @@ func add_box_xform(xform: Transform3D, size: Vector3, col: Color) -> void:
 
 ## Cylinder / truncated cone along +Y starting at `base`.
 func add_cylinder(base: Vector3, height: float, r_bottom: float, r_top: float,
-		segments: int, col: Color, cap_top: bool = true, cap_bottom: bool = false) -> void:
+		segments: int, col: Color, cap_top: bool = true, cap_bottom: bool = false,
+		bottom_shade: float = 0.85) -> void:
 	segments = maxi(3, segments)
 	var ring_b: PackedInt32Array = PackedInt32Array()
 	var ring_t: PackedInt32Array = PackedInt32Array()
@@ -138,33 +146,54 @@ func add_cylinder(base: Vector3, height: float, r_bottom: float, r_top: float,
 		var n: Vector3 = Vector3(ca * cos(slope), sin(slope), sa * cos(slope)).normalized()
 		var u: float = float(i) / float(segments)
 		ring_b.push_back(add_vertex(
-			base + Vector3(ca * r_bottom, 0.0, sa * r_bottom), n, Vector2(u, 0.0), col * 0.85))
+			base + Vector3(ca * r_bottom, 0.0, sa * r_bottom), n, Vector2(u, 0.0),
+			col * bottom_shade))
 		ring_t.push_back(add_vertex(
 			base + Vector3(ca * r_top, height, sa * r_top), n, Vector2(u, 1.0), col))
 	for i in segments:
-		add_triangle(ring_b[i], ring_b[i + 1], ring_t[i + 1])
-		add_triangle(ring_b[i], ring_t[i + 1], ring_t[i])
+		add_triangle(ring_b[i], ring_t[i + 1], ring_b[i + 1])
+		add_triangle(ring_b[i], ring_t[i], ring_t[i + 1])
 	if cap_top and r_top > 0.001:
 		var ct: int = add_vertex(base + Vector3(0.0, height, 0.0), Vector3.UP,
 			Vector2(0.5, 0.5), col)
 		for i in segments:
-			add_triangle(ct, ring_t[i], ring_t[i + 1])
+			add_triangle(ct, ring_t[i + 1], ring_t[i])
 	if cap_bottom and r_bottom > 0.001:
 		var cb: int = add_vertex(base, Vector3.DOWN, Vector2(0.5, 0.5), col * 0.7)
 		for i in segments:
-			add_triangle(cb, ring_b[i + 1], ring_b[i])
+			add_triangle(cb, ring_b[i], ring_b[i + 1])
+
+
+## Cylinder along an arbitrary axis. Wheels, pipes and struts need this;
+## building them along +Y and hoping was leaving every vehicle on four upright
+## drums instead of four wheels.
+func add_cylinder_xform(xform: Transform3D, height: float, r_bottom: float,
+		r_top: float, segments: int, col: Color, cap_top: bool = true,
+		cap_bottom: bool = true) -> void:
+	var start: int = verts.size()
+	add_cylinder(Vector3.ZERO, height, r_bottom, r_top, segments, col,
+		cap_top, cap_bottom)
+	var basis: Basis = xform.basis
+	var nrm_basis: Basis = basis.inverse().transposed()
+	for i in range(start, verts.size()):
+		verts[i] = xform * verts[i]
+		normals[i] = (nrm_basis * normals[i]).normalized()
 
 
 ## Cone along +Y (used for conifer canopies and spikes).
 func add_cone(base: Vector3, height: float, radius: float, segments: int,
-		col: Color, cap: bool = true) -> void:
-	add_cylinder(base, height, radius, 0.001, segments, col, false, cap)
+		col: Color, cap: bool = true, bottom_shade: float = 0.85) -> void:
+	add_cylinder(base, height, radius, 0.001, segments, col, false, cap, bottom_shade)
 
 
 ## Low-poly icosphere-ish blob built from a subdivided octahedron, jittered by
 ## `noise_amount` for rocks and organic canopies.
+## `ao` bakes a vertical ambient-occlusion gradient into the vertex colours:
+## the underside of a canopy is darker than the top. Godot's mobile renderer
+## has no SSAO, so baking it here is what stops foliage reading as flat blobs.
 func add_blob(center: Vector3, radius: Vector3, subdiv: int, col: Color,
-		rng: RandomNumberGenerator = null, noise_amount: float = 0.0) -> void:
+		rng: RandomNumberGenerator = null, noise_amount: float = 0.0,
+		ao: float = 0.0) -> void:
 	var base_v: Array[Vector3] = [
 		Vector3.UP, Vector3.DOWN, Vector3.LEFT, Vector3.RIGHT,
 		Vector3.FORWARD, Vector3.BACK,
@@ -199,10 +228,11 @@ func add_blob(center: Vector3, radius: Vector3, subdiv: int, col: Color,
 		if rng != null and noise_amount > 0.0:
 			jitter = 1.0 + rng.randf_range(-noise_amount, noise_amount)
 		var local: Vector3 = Vector3(p.x * radius.x, p.y * radius.y, p.z * radius.z) * jitter
+		var shade: float = 1.0 - ao * (0.5 - p.y * 0.5)
 		offs.push_back(add_vertex(center + local, p,
-			Vector2(0.5 + p.x * 0.5, 0.5 + p.z * 0.5), col))
+			Vector2(0.5 + p.x * 0.5, 0.5 + p.z * 0.5), col * shade))
 	for f: Array in faces:
-		add_triangle(offs[f[0]], offs[f[1]], offs[f[2]])
+		add_triangle(offs[f[0]], offs[f[2]], offs[f[1]])
 
 
 ## Two crossed vertical quads -- the classic cheap foliage/grass card.

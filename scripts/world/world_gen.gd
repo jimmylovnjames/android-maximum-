@@ -22,6 +22,7 @@ var n_warp: FastNoiseLite
 var n_moist: FastNoiseLite
 var n_district: FastNoiseLite
 var n_scatter: FastNoiseLite
+var n_bump: FastNoiseLite
 
 
 func _init(seed_value: int) -> void:
@@ -35,6 +36,9 @@ func _init(seed_value: int) -> void:
 	n_district.cellular_distance_function = FastNoiseLite.DISTANCE_EUCLIDEAN
 	n_district.cellular_return_type = FastNoiseLite.RETURN_CELL_VALUE
 	n_scatter = _mk(seed_value + 7, 0.045, FastNoiseLite.TYPE_SIMPLEX, 2, 0.5, 2.0)
+	# Metre-scale relief. Without it the terrain is a set of smooth domes and
+	# nothing in the near field has any shape.
+	n_bump = _mk(seed_value + 8, 0.021, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 3, 0.45, 2.4)
 
 
 func _mk(s: int, freq: float, t: int, oct: int, gain: float, lac: float) -> FastNoiseLite:
@@ -147,6 +151,7 @@ func height_u(x: float, z: float, u: float) -> float:
 	var h: float = base * GameConfig.TERRAIN_AMPLITUDE
 	h += hill * 11.0 * relief
 	h += ridge * 26.0 * relief * clampf(r / 800.0, 0.15, 1.0)
+	h += n_bump.get_noise_2d(x, z) * 2.6 * relief
 
 	if u > 0.001:
 		var plateau: float = district_height(x, z)
@@ -215,24 +220,27 @@ func terrain_color_u(x: float, z: float, h: float, u: float) -> Color:
 	var m: float = moisture(x, z)
 	var rl: float = redline_factor(x, z)
 
-	var dry := Color(0.42, 0.40, 0.24)
-	var lush := Color(0.16, 0.34, 0.14)
-	var alpine := Color(0.38, 0.40, 0.36)
-	var c: Color = dry.lerp(lush, m)
+	var dry := Color(0.33, 0.29, 0.15)
+	var lush := Color(0.09, 0.23, 0.08)
+	var alpine := Color(0.28, 0.29, 0.27)
+	var c: Color = dry.lerp(lush, smoothstep(0.15, 0.85, m))
+	# Metre-scale patchiness: bare earth showing through the sward.
+	var patch: float = n_bump.get_noise_2d(x * 0.5, z * 0.5) * 0.5 + 0.5
+	c = c.lerp(Color(0.26, 0.20, 0.13), clampf((patch - 0.62) * 2.2, 0.0, 1.0) * 0.5)
 
 	if h > 30.0:
 		c = c.lerp(alpine, clampf((h - 30.0) / 28.0, 0.0, 1.0))
 	if h < GameConfig.WATER_LEVEL + 2.0:
-		c = c.lerp(Color(0.44, 0.40, 0.30), 0.6)
+		c = c.lerp(Color(0.36, 0.32, 0.22), 0.6)
 
 	# Urban ground: concrete and asphalt.
-	var urban := Color(0.22, 0.22, 0.235)
+	var urban := Color(0.17, 0.17, 0.185)
 	c = c.lerp(urban, u * 0.8)
 	if on_road(x, z) and u > 0.15:
 		c = c.lerp(Color(0.095, 0.095, 0.105), u)
 
 	# REDLINE zones are scorched.
-	c = c.lerp(Color(0.19, 0.10, 0.09), rl * 0.75)
+	c = c.lerp(Color(0.15, 0.08, 0.07), rl * 0.75)
 	return c
 
 
@@ -255,11 +263,11 @@ func tree_density_at(x: float, z: float, h: float) -> float:
 	var base: float = 0.0
 	match zone:
 		GameConfig.Zone.WILDERNESS:
-			base = 0.22 + m * 0.35
+			base = 0.26 + m * 0.42
 		GameConfig.Zone.FOREST:
-			base = 0.72 + m * 0.55
+			base = 1.25 + m * 0.85
 		GameConfig.Zone.SETTLEMENT:
-			base = 0.34 + m * 0.2
+			base = 0.45 + m * 0.3
 		GameConfig.Zone.TOWN:
 			base = 0.16
 		GameConfig.Zone.CITY:
@@ -312,10 +320,12 @@ func building_height_range(zone: int, rl: float) -> Vector2:
 		GameConfig.Zone.TOWN:
 			return Vector2(2.0, 6.0)
 		GameConfig.Zone.CITY:
-			return Vector2(4.0, 22.0 + rl * 10.0)
+			# 16 m block cells cannot carry 75 m towers without turning every
+			# street into an unlit canyon.
+			return Vector2(3.0, 15.0 + rl * 7.0)
 		GameConfig.Zone.INDUSTRIAL:
 			return Vector2(2.0, 9.0)
 		GameConfig.Zone.REDLINE:
-			return Vector2(3.0, 18.0)
+			return Vector2(2.0, 13.0)
 		_:
 			return Vector2(1.0, 1.0)

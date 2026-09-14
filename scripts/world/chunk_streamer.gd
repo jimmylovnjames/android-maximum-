@@ -144,14 +144,17 @@ func _publish_counters() -> void:
 	PerformanceMonitor.set_counter("chunk_cache_mb", cache_megabytes())
 	PerformanceMonitor.set_counter("stream_queue", pending_count())
 	var inst: int = 0
-	var buildings: int = 0
+	var by_category: Dictionary = {}
 	for c: Vector2i in active.keys():
 		var ch: WorldChunk = active[c]
 		if ch.realized:
 			inst += ch.visible_instances()
-			buildings += ch.visible_building_modules()
+			ch.accumulate_category_counts(by_category)
 	PerformanceMonitor.set_counter("multimesh_instances", inst)
-	PerformanceMonitor.set_counter("buildings", buildings)
+	PerformanceMonitor.set_counter("buildings", int(by_category.get("building", 0)))
+	PerformanceMonitor.set_counter("grass_instances", int(by_category.get("grass", 0)))
+	PerformanceMonitor.set_counter("tree_instances", int(by_category.get("tree", 0)))
+	PerformanceMonitor.set_counter("prop_instances", int(by_category.get("prop", 0)))
 
 
 # -----------------------------------------------------------------------------

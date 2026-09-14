@@ -8,22 +8,20 @@ extends Control
 signal closed()
 signal rerun_requested(mode: int)
 
-var _banner: PanelContainer
-var _stage_label: Label
-var _progress: ProgressBar
-var _live_label: Label
+var _banner: _Banner
 var _abort_button: Button
 
 var _results_panel: Control
 var _results_text: RichTextLabel
 var _results_title: Label
+var _headline: _Headline
 var _saved_label: Label
 var _last_mode: int = BenchmarkManager.Mode.STANDARD
 
 
 func _ready() -> void:
 	name = "BenchmarkOverlay"
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_banner()
@@ -35,59 +33,86 @@ func _ready() -> void:
 
 
 func _build_banner() -> void:
-	_banner = PanelContainer.new()
-	_banner.add_theme_stylebox_override("panel", UITheme.panel(8))
-	_banner.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_banner.offset_top = 16
-	_banner.offset_left = -270
-	_banner.offset_right = 270
+	_banner = _Banner.new()
+	_banner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_banner.visible = false
 	add_child(_banner)
 
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 4)
-	_banner.add_child(col)
-
-	_stage_label = UITheme.label("", 16, UITheme.ACCENT)
-	_stage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(_stage_label)
-
-	_progress = ProgressBar.new()
-	_progress.custom_minimum_size = Vector2(510, 10)
-	_progress.show_percentage = false
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0, 0, 0, 0.5)
-	bg.set_corner_radius_all(3)
-	var fg := StyleBoxFlat.new()
-	fg.bg_color = UITheme.ACCENT
-	fg.set_corner_radius_all(3)
-	_progress.add_theme_stylebox_override("background", bg)
-	_progress.add_theme_stylebox_override("fill", fg)
-	col.add_child(_progress)
-
-	_live_label = UITheme.label("", 12, UITheme.TEXT_DIM)
-	_live_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(_live_label)
-
 	_abort_button = UITheme.button("ABORT BENCHMARK", 12)
+	_abort_button.anchor_left = 0.5
+	_abort_button.anchor_right = 0.5
+	_abort_button.anchor_top = 0.0
+	_abort_button.anchor_bottom = 0.0
+	_abort_button.offset_left = -90.0
+	_abort_button.offset_right = 90.0
+	_abort_button.offset_top = 96.0
+	_abort_button.offset_bottom = 130.0
+	_abort_button.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_abort_button.visible = false
 	_abort_button.pressed.connect(func() -> void: BenchmarkManager.abort("user aborted"))
-	col.add_child(_abort_button)
+	add_child(_abort_button)
+
+
+## Progress strip drawn across the top of the screen: stage name, a pip per
+## stage, the overall bar and a live figure row.
+class _Banner extends Control:
+	var stage_name: String = ""
+	var stage_index: int = 0
+	var stage_count: int = 0
+	var progress: float = 0.0
+
+	func _draw() -> void:
+		var w: float = minf(size.x - 80.0, 620.0)
+		var r := Rect2((size.x - w) * 0.5, 14.0, w, 76.0)
+		UITheme.draw_panel(self, r, UITheme.BG_SOLID, UITheme.EDGE)
+		UITheme.draw_brackets(self, r.grow(3.0), Color(1.0, 0.22, 0.18, 0.5), 16.0, 1.5)
+
+		UITheme.draw_spaced(self, Vector2(r.position.x + 14.0, r.position.y + 20.0),
+			"BENCHMARK RUNNING", 10, UITheme.ACCENT, 3.0)
+		UITheme.draw_text(self, Vector2(r.position.x + w - 14.0, r.position.y + 20.0),
+			"STAGE %d / %d" % [stage_index + 1, maxi(stage_count, 1)], 11,
+			UITheme.TEXT_DIM, 2)
+		UITheme.draw_text(self, Vector2(r.position.x + 14.0, r.position.y + 40.0),
+			stage_name, 15, UITheme.TEXT)
+
+		# Stage pips
+		var px: float = r.position.x + 14.0
+		var pw: float = (w - 28.0) / float(maxi(stage_count, 1))
+		for i in maxi(stage_count, 1):
+			var col: Color = UITheme.ACCENT if i < stage_index else (
+				UITheme.ACCENT_SOFT if i == stage_index else Color(1, 1, 1, 0.14))
+			draw_rect(Rect2(px + float(i) * pw, r.position.y + 50.0, pw - 3.0, 3.0),
+				col, true)
+
+		var track := Rect2(r.position.x + 14.0, r.position.y + 58.0, w - 28.0, 4.0)
+		draw_rect(track, Color(1, 1, 1, 0.09), true)
+		draw_rect(Rect2(track.position, Vector2(track.size.x * progress, 4.0)),
+			UITheme.ACCENT, true)
+
+		var p := PerformanceMonitor
+		var line: String = "%.0f fps   %.1f ms   %s   %d npc   %d bodies   %.0f MB" % [
+			p.fps, p.frame_ms, StressDirector.level_name(),
+			int(p.counters.get("npc_total", 0)),
+			int(p.counters.get("rigid_bodies", 0)), p.process_memory_mb()]
+		UITheme.draw_text(self, Vector2(r.position.x + w * 0.5, r.position.y + 72.0),
+			line, 11, UITheme.TEXT_DIM, 1)
 
 
 func _build_results() -> void:
 	_results_panel = Control.new()
-	_results_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_results_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_results_panel.visible = false
 	add_child(_results_panel)
 
 	var dim := ColorRect.new()
 	dim.color = Color(0.02, 0.025, 0.035, 0.9)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_results_panel.add_child(dim)
 
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", UITheme.panel(12, UITheme.BG_SOLID))
-	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	panel.offset_left = 40
 	panel.offset_right = -40
 	panel.offset_top = 24
@@ -100,6 +125,9 @@ func _build_results() -> void:
 
 	_results_title = UITheme.heading("BENCHMARK RESULTS", 24, UITheme.ACCENT)
 	col.add_child(_results_title)
+
+	_headline = _Headline.new()
+	col.add_child(_headline)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -140,16 +168,22 @@ func _on_started(mode_name: String) -> void:
 	_last_mode = (BenchmarkManager.Mode.ENDURANCE if mode_name == "ENDURANCE"
 		else BenchmarkManager.Mode.STANDARD)
 	_banner.visible = true
+	_abort_button.visible = true
+	_banner.progress = 0.0
+	_banner.stage_count = (BenchmarkManager.STAGES_ENDURANCE.size()
+		if _last_mode == BenchmarkManager.Mode.ENDURANCE
+		else BenchmarkManager.STAGES_STANDARD.size())
 	_results_panel.visible = false
-	_progress.value = 0.0
 
 
 func _on_stage(index: int, stage_name: String) -> void:
-	_stage_label.text = "STAGE %d  %s" % [index + 1, stage_name]
+	_banner.stage_index = index
+	_banner.stage_name = stage_name
 
 
 func _on_aborted(reason: String) -> void:
 	_banner.visible = false
+	_abort_button.visible = false
 	EventBus.notify("Benchmark aborted (%s)" % reason, 4.0)
 
 
@@ -157,19 +191,17 @@ func _process(_delta: float) -> void:
 	if not BenchmarkManager.running:
 		if _banner.visible:
 			_banner.visible = false
+			_abort_button.visible = false
 		return
-	_progress.value = BenchmarkManager.progress() * 100.0
-	var p := PerformanceMonitor
-	_live_label.text = "%.0f fps   %.1f ms   %s   %d npc   %d bodies   %.0f MB" % [
-		p.fps, p.frame_ms, StressDirector.level_name(),
-		int(p.counters.get("npc_total", 0)), int(p.counters.get("rigid_bodies", 0)),
-		p.process_memory_mb(),
-	]
+	_banner.progress = BenchmarkManager.progress()
+	_banner.queue_redraw()
 
 
 func _on_finished(r: Dictionary) -> void:
 	_banner.visible = false
+	_abort_button.visible = false
 	_results_panel.visible = true
+	_headline.set_results(r)
 	_results_title.text = "REDLINE  %s BENCHMARK" % r.get("mode", "")
 
 	var t: String = ""
@@ -238,3 +270,48 @@ func _on_finished(r: Dictionary) -> void:
 
 func _kv(k: String, v: String) -> String:
 	return "[color=#7a8390]%s:[/color] [b]%s[/b]\n" % [k, v]
+
+
+## The five figures that answer "how did this device do". Everything else is
+## detail below the fold.
+class _Headline extends Control:
+	var tiles: Array[Dictionary] = []
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(0, 96)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func set_results(r: Dictionary) -> void:
+		var low: String = ("%.1f" % float(r["low_1pc_fps"])) if bool(r["low_1pc_valid"]) \
+			else "n/a"
+		tiles = [
+			{"label": "AVERAGE FPS", "value": "%.1f" % float(r["avg_fps"]),
+				"color": UITheme.value_color(float(r["avg_fps"]), 50.0, 24.0)},
+			{"label": "1% LOW", "value": low, "color": UITheme.ACCENT_2},
+			{"label": "MINIMUM FPS", "value": "%.1f" % float(r["min_fps"]),
+				"color": UITheme.value_color(float(r["min_fps"]), 40.0, 15.0)},
+			{"label": "PEAK MEMORY", "value": "%.0f MB" % float(
+				r["peak_measured_memory_mb"]), "color": UITheme.TEXT},
+			{"label": "MAX STRESS", "value": String(r["max_stress_name"]),
+				"color": UITheme.level_color(int(r["max_stress_level"]))},
+			{"label": "SUSTAINED DROP", "value": "%.1f %%" % float(
+				r["sustained_degradation_percent"]), "color": UITheme.WARN},
+		]
+		queue_redraw()
+
+	func _draw() -> void:
+		if tiles.is_empty():
+			return
+		var n: int = tiles.size()
+		var gap: float = 8.0
+		var w: float = (size.x - gap * float(n - 1)) / float(n)
+		for i in n:
+			var t: Dictionary = tiles[i]
+			var r := Rect2(float(i) * (w + gap), 0.0, w, 88.0)
+			UITheme.draw_panel(self, r, UITheme.BG, UITheme.EDGE, 8.0)
+			var col: Color = t["color"]
+			draw_rect(Rect2(r.position.x, r.position.y, w, 3.0), col, true)
+			UITheme.draw_spaced(self, Vector2(r.position.x + 12.0, r.position.y + 26.0),
+				String(t["label"]), 9, UITheme.TEXT_FAINT, 2.0)
+			UITheme.draw_text(self, Vector2(r.position.x + 12.0, r.position.y + 62.0),
+				String(t["value"]), 26, col)

@@ -29,11 +29,13 @@ func setup(s: ChunkStreamer) -> void:
 
 
 func apply_profile(profile: Dictionary) -> void:
-	# The divisors are the MELTDOWN table values, so the top stress level with
-	# the INSANE preset saturates at 100% of generated instances.
-	grass_fraction = clampf(float(profile.get("grass_multiplier", 1.0)) / 3.6, 0.02, 1.0)
-	tree_fraction = clampf(float(profile.get("veg_density", 1.0)) / 2.6, 0.05, 1.0)
-	bush_fraction = clampf(tree_fraction * 0.85, 0.02, 1.0)
+	# Saturates well before MELTDOWN: past the point where the view is full of
+	# foliage, extra instances only add cost. The stress levels above that
+	# keep scaling the *generated* set through veg_step, which is what actually
+	# raises the geometry and memory load.
+	grass_fraction = clampf(float(profile.get("grass_multiplier", 1.0)) / 1.6, 0.06, 1.0)
+	tree_fraction = clampf(float(profile.get("veg_density", 1.0)) / 1.35, 0.1, 1.0)
+	bush_fraction = clampf(tree_fraction * 0.9, 0.05, 1.0)
 	prop_fraction = clampf(float(profile.get("building_detail", 1.0)) / 1.7, 0.15, 1.0)
 	detail_fraction = clampf(prop_fraction * 0.9, 0.1, 1.0)
 	_version += 1

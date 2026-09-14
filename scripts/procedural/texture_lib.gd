@@ -36,7 +36,7 @@ static func noise_texture(seed_value: int, size: int, frequency: float,
 	t.generate_mipmaps = true
 	t.as_normal_map = normal_map
 	if normal_map:
-		t.bump_strength = 6.0
+		t.bump_strength = 2.2
 	t.noise = make_noise(seed_value, frequency, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, octaves)
 	return t
 
@@ -54,26 +54,30 @@ static func ramped_noise_texture(seed_value: int, size: int, frequency: float,
 
 ## Small hand-generated alpha masks. These loops are intentionally tiny
 ## (<= 16k pixels) so generation stays under a millisecond on mobile.
-static func grass_blade_mask(size_x: int = 64, size_y: int = 128, seed_value: int = 1) -> ImageTexture:
+static func grass_blade_mask(size_x: int = 64, size_y: int = 128,
+		seed_value: int = 1) -> ImageTexture:
 	var img: Image = Image.create(size_x, size_y, true, Image.FORMAT_RGBA8)
 	img.fill(Color(1, 1, 1, 0))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
-	var blades: int = 7
+	# Coverage matters more than blade count: an alpha-tested card whose mask
+	# is mostly transparent loses its remaining alpha to mipmapping and simply
+	# disappears a few metres from the camera.
+	var blades: int = 13
 	for b in blades:
-		var cx: float = rng.randf_range(0.12, 0.88) * float(size_x)
-		var w: float = rng.randf_range(0.035, 0.075) * float(size_x)
-		var lean: float = rng.randf_range(-0.22, 0.22) * float(size_x)
-		var top: float = rng.randf_range(0.05, 0.45) * float(size_y)
-		var shade: float = rng.randf_range(0.62, 1.0)
+		var cx: float = rng.randf_range(0.06, 0.94) * float(size_x)
+		var w: float = rng.randf_range(0.07, 0.13) * float(size_x)
+		var lean: float = rng.randf_range(-0.26, 0.26) * float(size_x)
+		var top: float = rng.randf_range(0.02, 0.34) * float(size_y)
+		var shade: float = rng.randf_range(0.68, 1.0)
 		for y in range(int(top), size_y):
 			var t: float = float(y - top) / maxf(1.0, float(size_y) - top)
-			var cw: float = w * (0.25 + 0.75 * t)
+			var cw: float = w * (0.3 + 0.7 * t)
 			var cxx: float = cx + lean * (1.0 - t)
 			var x0: int = int(floor(cxx - cw))
 			var x1: int = int(ceil(cxx + cw))
 			for x in range(maxi(0, x0), mini(size_x, x1 + 1)):
-				var v: float = shade * (0.55 + 0.45 * t)
+				var v: float = shade * (0.6 + 0.4 * t)
 				img.set_pixel(x, y, Color(v, v, v, 1.0))
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)

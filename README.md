@@ -48,6 +48,16 @@ Useful command line flags:
 | `--test-autopilot` | Walk the player on a fixed arc |
 | `--test-travel` | March the player outward across chunk boundaries |
 | `--test-sweep` | Cycle every quality preset and stress level while running |
+| `--selftest` | Geometry orientation, determinism and safety-cap checks; prints JSON, exits |
+| `--quality=0..4` | Force a quality preset |
+| `--start-radius=N` | Spawn at N metres from the origin (skip the walk to the city) |
+| `--time-of-day=H` | Freeze the clock at hour H |
+| `--hud=0\|1\|2` | HUD off / compact / expanded telemetry |
+| `--force-touch` | Show the touch layer on desktop |
+| `--godmode` | Invulnerable, for screenshots and long captures |
+| `--show-menu` | Boot to the title screen instead of straight into the world |
+| `--mesh-gallery` | Lay every procedural mesh out on a grid for inspection |
+| `--shots=a,b,c --shot-dir=DIR` | Save the framebuffer at those elapsed seconds |
 
 ## Building the Android APK
 
@@ -69,6 +79,25 @@ adb install -r export/redline-arm64.apk
 
 The default preset uses Godot's prebuilt Android template, so Android Studio
 and the Gradle build path are not required.
+
+### Looking at it without a GPU
+
+This project was built and verified on a headless machine. Godot renders under
+Xvfb with Mesa's `lavapipe` software Vulkan driver, which is slow (single-digit
+FPS) but pixel-accurate — enough to catch inverted winding, broken shaders and
+HUD layout collisions that no headless test can see:
+
+```bash
+apt-get install -y mesa-vulkan-drivers xvfb
+xvfb-run -a -s "-screen 0 1280x720x24" \
+  env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+  godot --path . --resolution 1280x720 \
+  --test-run=24 --shots=18 --shot-dir=/tmp/shots \
+  --start-radius=1750 --time-of-day=20.5 --godmode --hud=2
+```
+
+`--mesh-gallery` renders every generated mesh side by side on a neutral
+backdrop, which is the fastest way to check a procedural asset in isolation.
 
 ## Controls
 
@@ -117,6 +146,26 @@ does not claim to measure temperature.
 
 Any metric the platform does not expose is written as `null` in the JSON and
 shown as `n/a` on screen. Nothing is estimated to fill a gap.
+
+## Interface
+
+The HUD is drawn rather than assembled from stock Controls — chamfered panels,
+corner brackets, segmented meters and letter-spaced titles, all in a single
+`_draw()` pass per layer. That keeps a 40-value telemetry panel with four live
+graphs off the UI update path entirely, and makes the layout
+resolution-independent, which matters on a phone in landscape.
+
+In play you get a segmented vitals cluster, a magazine readout, an objective
+card with a progress track, a heading ribbon showing your bearing, distance
+from the origin and current zone, a reticle that spreads with movement and
+turns red on a hostile, damage arcs pointing at what hit you, and a toast
+stack. The layout moves itself: with touch controls up, the vitals and ammo
+blocks slide inward clear of the stick and the action cluster, and the
+navigation furniture stands down while the expanded telemetry panel is open.
+
+`F2` cycles HUD off → compact → expanded. Compact is a corner readout with an
+inline FPS sparkline. Expanded is the benchmark view: FRAME, RENDER, MEMORY and
+WORLD groups plus FPS, frame time, memory and GPU graphs.
 
 ## Stress levels and quality presets
 
@@ -183,11 +232,26 @@ quality preset. Replacing procedural placeholders with authored assets means
 changing the bodies of those builders and nothing else.
 
 Shaders (`shaders/`) are written for Godot's mobile renderer: no screen or
-depth texture reads, no SDFGI, no SSAO/SSR/SSIL, no volumetric fog. Terrain
-blends biome tint with slope-selected rock and two detail scales; foliage sways
-per-instance from `INSTANCE_CUSTOM`; the building shader derives a window grid
-from each instance's world scale and lights a stable subset at night; water is
-Gerstner-ish vertex motion with a scrolling normal map and a fresnel ramp.
+depth texture reads, no SDFGI, no SSAO/SSR/SSIL, no volumetric fog.
+
+* **terrain** blends the biome tint with slope-selected rock across two detail
+  scales, perturbs the normal from two crossed lookups (one tiles visibly), and
+  reads how built-up the ground is from the vertex alpha so that organic hue
+  variation applies to soil but not to concrete.
+* **vegetation** sways per instance from `INSTANCE_CUSTOM`, with a vertical
+  ambient-occlusion gradient baked into the vertex colours — the mobile
+  renderer has no SSAO, and without it foliage reads as flat blobs.
+* **building** derives a window grid from each instance's world-space scale so
+  modules of different sizes line up, adds a spandrel band between floors, and
+  lights a stable per-instance subset of windows after dark.
+* **sky** is fully analytic: a day/dusk/night gradient, stars, a sun disc, and a
+  domain-warped FBM cloud deck evaluated at reduced octave count during the
+  cubemap and half-resolution passes.
+* **water** is Gerstner-ish vertex motion with a scrolling normal map and a
+  fresnel ramp.
+* **postfx** is a transparent full-screen quad in its own CanvasLayer —
+  vignette, shadow tint and grain — because the mobile renderer cannot read the
+  screen buffer for a real post-process pass.
 
 ```
 scenes/            main.tscn (everything else is built in code)
@@ -209,10 +273,24 @@ tools/             Android export setup, debug keystore
 
 ## Tests
 
-`tests/run_tests.sh` runs the whole suite headless. It checks that the project
-imports with no parser or autoload errors, that the world boots and streams,
-that the terrain collision surface exists and is not inside out, that
-travelling across chunk boundaries fills the retention cache, that sweeping
-every quality preset and stress level at runtime stays clean, and that a high
-stress level genuinely produces more work than a low one. Every assertion is
-made against a JSON report the engine itself produced.
+`tests/run_tests.sh` runs the whole suite headless:
+
+1. The project imports with no parser or autoload errors.
+2. Every script parses on its own (`--check-only`), which catches syntax errors
+   the whole-project import hides behind one "could not parse global class".
+3. `--selftest`: every generated mesh faces the same way as Godot's own
+   primitives, the chunk collision surface is hit from above and not from
+   below, the same seed produces identical chunks, and no stress level exceeds
+   a `GameConfig` cap.
+4. The world boots and streams.
+5. Travelling across chunk boundaries fills the retention cache.
+6. Sweeping every quality preset and stress level at runtime stays clean.
+7. A high stress level genuinely produces more work than a low one.
+
+Every assertion is made against JSON the engine itself produced.
+
+The mesh-orientation and collision-orientation checks exist because inverted
+triangle winding is silent: meshes render inside out — dark, hollow, oddly
+flat — and a collision surface can only be hit from underneath, so the player
+falls through the world and lands on it from below. Both cost real debugging
+time here before the checks existed.

@@ -7,10 +7,10 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // instance (derived from INSTANCE_CUSTOM) instead of flickering per frame.
 
 uniform sampler2D wall_tex : source_color, filter_linear_mipmap, repeat_enable;
-uniform float window_w = 1.5;
-uniform float window_h = 1.9;
-uniform float window_fill = 0.52;
-uniform vec4 window_day : source_color = vec4(0.08, 0.10, 0.13, 1.0);
+uniform float window_w = 1.35;
+uniform float window_h = 1.7;
+uniform float window_fill = 0.46;
+uniform vec4 window_day : source_color = vec4(0.11, 0.14, 0.17, 1.0);
 uniform vec4 window_lit : source_color = vec4(1.0, 0.82, 0.52, 1.0);
 uniform float emission_energy = 3.2;
 uniform float lit_fraction : hint_range(0.0, 1.0) = 0.42;
@@ -62,12 +62,21 @@ void fragment() {
 	float r = hash21(cid + vec2(v_seed * 97.0, v_seed * 37.0));
 	float lit = step(1.0 - lit_fraction, r) * clamp(redline_night, 0.0, 1.0);
 
+	// Horizontal spandrel band between floors so storeys read at distance even
+	// when the window grid itself is too small to resolve.
+	float band = smoothstep(0.06, 0.0, abs(f.y - 0.02)) * v_is_wall;
+	base *= mix(1.0, 0.82, band);
+
 	vec3 glass = mix(window_day.rgb, window_lit.rgb, lit);
+	// Daylight glass picks up a little of the sky rather than reading as a
+	// hole punched through the facade.
+	float sky_bounce = 1.0 - clamp(redline_night, 0.0, 1.0);
+	glass = mix(glass, glass + vec3(0.05, 0.07, 0.11) * (0.5 + r), sky_bounce);
 	ALBEDO = mix(base, glass, inw);
 	EMISSION = window_lit.rgb * (inw * lit * emission_energy * (0.55 + 0.45 * r));
-	ROUGHNESS = mix(wall_roughness, 0.12, inw);
-	METALLIC = mix(0.0, 0.35, inw);
-	SPECULAR = mix(0.3, 0.6, inw);
+	ROUGHNESS = mix(wall_roughness, 0.08, inw);
+	METALLIC = mix(0.0, 0.55, inw);
+	SPECULAR = mix(0.3, 0.85, inw);
 
 	float wet = clamp(redline_wetness, 0.0, 1.0);
 	ROUGHNESS *= mix(1.0, 0.6, wet);

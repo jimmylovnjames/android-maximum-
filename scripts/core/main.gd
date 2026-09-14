@@ -11,6 +11,7 @@ const SMOKE_REPORT_PATH: String = "user://redline_smoke.json"
 
 var world: WorldManager = null
 var ui_layer: CanvasLayer
+var postfx_layer: CanvasLayer = null
 var touch: TouchInput
 var game_hud: GameHUD
 var perf_hud: PerfHUD
@@ -28,12 +29,26 @@ var _test_travel: bool = false
 var _test_sweep: bool = false
 var _sweep_timer: float = 0.0
 var _sweep_step: int = 0
+var _shot_times: Array[float] = []
+var _shot_dir: String = "user://shots"
+var _shot_index: int = 0
+var _start_radius: float = -1.0
+var _force_quality: int = -1
+var _start_time: float = -1.0
+var _selftest: bool = false
+var _mesh_gallery: bool = false
+var _godmode: bool = false
+var _show_menu: bool = false
 
 
 func _ready() -> void:
 	name = "Main"
 	randomize()
 	_parse_cli()
+
+	# Grade layer sits between the 3D viewport and the HUD: vignette and grain
+	# belong to the image, not to the interface.
+	_build_postfx()
 
 	ui_layer = CanvasLayer.new()
 	ui_layer.name = "UI"
@@ -78,11 +93,62 @@ func _ready() -> void:
 	EventBus.benchmark_aborted.connect(_on_benchmark_aborted)
 	get_tree().auto_accept_quit = true
 
-	if _test_seconds > 0.0 or _auto_bench >= 0:
+	if _selftest:
+		call_deferred("_run_selftest")
+		return
+
+	if _mesh_gallery:
+		main_menu.visible = false
+		perf_hud.set_mode(PerfHUD.Mode.OFF)
+		MaterialLib.refresh_for_preset(AdaptiveQualityManager.preset)
+		MeshLib.reset()
+		MeshLib.get_instance()
+		var gallery := MeshGallery.new()
+		add_child(gallery)
+		gallery.build()
+		_started = true
+		return
+
+	if (_test_seconds > 0.0 or _auto_bench >= 0) and not _show_menu:
 		_start_game()
 		if _auto_bench >= 0:
 			await get_tree().create_timer(2.0).timeout
 			_start_benchmark(_auto_bench)
+
+
+## Full-screen grade. A transparent quad in its own CanvasLayer rather than a
+## screen-space post-process, because Godot's mobile renderer cannot read the
+## screen buffer.
+func _build_postfx() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var shader: Shader = load("res://shaders/postfx.gdshader") as Shader
+	if shader == null:
+		return
+	postfx_layer = CanvasLayer.new()
+	postfx_layer.name = "PostFX"
+	postfx_layer.layer = 5
+	add_child(postfx_layer)
+	var rect := ColorRect.new()
+	rect.name = "Grade"
+	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	rect.material = mat
+	postfx_layer.add_child(rect)
+
+
+## Static geometry/determinism/safety checks. No world, no display.
+func _run_selftest() -> void:
+	MaterialLib.refresh_for_preset(AdaptiveQualityManager.preset)
+	MeshLib.reset()
+	MeshLib.get_instance()
+	var results: Dictionary = SelfTest.run_all(GameConfig.world_seed)
+	print("REDLINE_SELFTEST_BEGIN")
+	print(JSON.stringify(results, "  "))
+	print("REDLINE_SELFTEST_END")
+	get_tree().quit(0 if bool(results["ok"]) else 1)
 
 
 func _parse_cli() -> void:
@@ -103,6 +169,31 @@ func _parse_cli() -> void:
 			_test_travel = true
 		elif arg == "--test-sweep":
 			_test_sweep = true
+		elif arg.begins_with("--shots="):
+			# Comma separated seconds at which to capture the framebuffer.
+			for t: String in arg.split("=")[1].split(","):
+				_shot_times.append(float(t))
+			_shot_times.sort()
+		elif arg.begins_with("--shot-dir="):
+			_shot_dir = arg.split("=", true, 1)[1]
+		elif arg.begins_with("--start-radius="):
+			_start_radius = float(arg.split("=")[1])
+		elif arg.begins_with("--hud="):
+			GameConfig.settings["hud_mode"] = int(arg.split("=")[1])
+		elif arg == "--force-touch":
+			GameConfig.settings["touch_controls"] = 1
+		elif arg.begins_with("--quality="):
+			_force_quality = int(arg.split("=")[1])
+		elif arg.begins_with("--time-of-day="):
+			_start_time = float(arg.split("=")[1])
+		elif arg == "--selftest":
+			_selftest = true
+		elif arg == "--mesh-gallery":
+			_mesh_gallery = true
+		elif arg == "--godmode":
+			_godmode = true
+		elif arg == "--show-menu":
+			_show_menu = true
 
 
 # -----------------------------------------------------------------------------
@@ -122,9 +213,19 @@ func _start_game() -> void:
 
 	perf_hud.bind_world(world)
 	pause_menu.bind_world(world)
+	game_hud.bind(world.player, world, touch, perf_hud)
+
+	if _force_quality >= 0:
+		AdaptiveQualityManager.apply_preset(_force_quality, false)
+	if _start_radius > 0.0:
+		world.bench_teleport(_start_radius)
+	if _start_time >= 0.0:
+		world.day_night.set_time(_start_time)
+		world.day_night.paused = true
 
 	GameState.reset_run()
 	GameState.set_phase(GameState.Phase.PLAYING)
+	GameState.set_invulnerable(_godmode)
 	world.player.capture_mouse(true)
 	if _test_autopilot:
 		world.player.set_autopilot(true)
@@ -213,6 +314,10 @@ func _on_benchmark_finished(results: Dictionary) -> void:
 	print("REDLINE_BENCH_BEGIN")
 	print(JSON.stringify(results, "  "))
 	print("REDLINE_BENCH_END")
+	# Stay up if screenshots are still pending, so the results screen can be
+	# captured; the --test-run timer ends the process instead.
+	if _shot_index < _shot_times.size():
+		return
 	get_tree().quit(0)
 
 
@@ -254,6 +359,10 @@ func _process(delta: float) -> void:
 		_handle_death()
 	if _test_sweep:
 		_run_sweep(delta)
+	if _shot_index < _shot_times.size() and _test_elapsed >= _shot_times[_shot_index]:
+		var label: String = "shot_%02d_t%.0f" % [_shot_index, _shot_times[_shot_index]]
+		_shot_index += 1
+		_capture(label)
 	if _test_seconds > 0.0:
 		_test_elapsed += delta
 		if _test_elapsed >= _test_seconds:
@@ -282,6 +391,27 @@ func _run_sweep(delta: float) -> void:
 	else:
 		_sweep_step = -1
 	_sweep_step += 1
+
+
+## Saves the actual framebuffer. Used to verify the render on a machine with
+## no display (Xvfb plus Mesa's lavapipe software Vulkan driver).
+func _capture(label: String) -> void:
+	await RenderingServer.frame_post_draw
+	var tex: ViewportTexture = get_viewport().get_texture()
+	if tex == null:
+		printerr("capture failed: no viewport texture")
+		return
+	var img: Image = tex.get_image()
+	if img == null:
+		printerr("capture failed: no image")
+		return
+	DirAccess.make_dir_recursive_absolute(_shot_dir)
+	var path: String = "%s/%s.png" % [_shot_dir, label]
+	var err: int = img.save_png(path)
+	if err != OK:
+		printerr("capture failed (%d): %s" % [err, path])
+		return
+	print("REDLINE_SHOT %s" % ProjectSettings.globalize_path(path))
 
 
 var _death_timer: float = 0.0

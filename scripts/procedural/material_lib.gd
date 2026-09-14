@@ -15,6 +15,7 @@ const SH_PROP := "res://shaders/prop_instanced.gdshader"
 var terrain: ShaderMaterial
 var grass: ShaderMaterial
 var foliage: ShaderMaterial
+var canopy: ShaderMaterial
 var building: ShaderMaterial
 var water: ShaderMaterial
 var prop: ShaderMaterial
@@ -91,9 +92,12 @@ func rebuild(preset: int) -> void:
 		seed_base + 12, size, 0.004, true, false, 5)
 	var wave_n: NoiseTexture2D = TextureLib.noise_texture(
 		seed_base + 13, maxi(256, size / 2), 0.02, true, true, 3)
+	var ground_n: NoiseTexture2D = TextureLib.noise_texture(
+		seed_base + 14, size, 0.045, true, true, 5)
 	_count_tex(detail, size)
 	_count_tex(macro, size)
 	_count_tex(wave_n, maxi(256, size / 2))
+	_count_tex(ground_n, size)
 
 	wall_variants.clear()
 	surface_variants.clear()
@@ -117,7 +121,9 @@ func rebuild(preset: int) -> void:
 	terrain = _shader_mat(SH_TERRAIN, terrain)
 	terrain.set_shader_parameter("detail_tex", detail)
 	terrain.set_shader_parameter("macro_tex", macro)
+	terrain.set_shader_parameter("detail_normal", ground_n)
 	terrain.set_shader_parameter("water_level", GameConfig.WATER_LEVEL)
+	terrain.set_shader_parameter("normal_strength", 0.5)
 
 	# --- Vegetation ----------------------------------------------------------
 	grass = _shader_mat(SH_VEGETATION, grass)
@@ -125,8 +131,8 @@ func rebuild(preset: int) -> void:
 	grass.set_shader_parameter("wind_strength", 0.55)
 	grass.set_shader_parameter("wind_speed", 2.1)
 	grass.set_shader_parameter("stiffness", 0.15)
-	grass.set_shader_parameter("alpha_cut", 0.35)
-	grass.set_shader_parameter("translucency", 0.45)
+	grass.set_shader_parameter("alpha_cut", 0.22)
+	grass.set_shader_parameter("translucency", 0.55)
 	grass.set_shader_parameter("use_mask", true)
 
 	foliage = _shader_mat(SH_VEGETATION, foliage)
@@ -134,9 +140,17 @@ func rebuild(preset: int) -> void:
 	foliage.set_shader_parameter("wind_strength", 0.3)
 	foliage.set_shader_parameter("wind_speed", 1.1)
 	foliage.set_shader_parameter("stiffness", 0.6)
-	foliage.set_shader_parameter("alpha_cut", 0.45)
+	foliage.set_shader_parameter("alpha_cut", 0.3)
 	foliage.set_shader_parameter("translucency", 0.3)
 	foliage.set_shader_parameter("use_mask", true)
+
+	canopy = _shader_mat(SH_VEGETATION, canopy)
+	canopy.set_shader_parameter("leaf_mask", leaf_mask)
+	canopy.set_shader_parameter("wind_strength", 0.22)
+	canopy.set_shader_parameter("wind_speed", 0.9)
+	canopy.set_shader_parameter("stiffness", 0.75)
+	canopy.set_shader_parameter("translucency", 0.28)
+	canopy.set_shader_parameter("use_mask", false)
 
 	# --- Buildings / props ---------------------------------------------------
 	building = _shader_mat(SH_BUILDING, building)
@@ -156,11 +170,14 @@ func rebuild(preset: int) -> void:
 	_sync_variant_mats()
 
 	# --- Standard materials --------------------------------------------------
-	bark = _std(Color(0.25, 0.19, 0.14), 0.92, 0.0, bark)
-	road = _std(Color(0.10, 0.10, 0.115), 0.86, 0.0, road)
-	metal = _std(Color(0.42, 0.44, 0.47), 0.42, 0.85, metal)
-	flesh = _std(Color(0.42, 0.37, 0.33), 0.78, 0.0, flesh)
-	hostile = _std(Color(0.36, 0.09, 0.10), 0.6, 0.0, hostile)
+	# These meshes carry their colour in the vertex stream, so the material
+	# albedo stays white -- tinting here as well multiplies the two together
+	# and turns every prop and tree trunk near-black.
+	bark = _std(Color(1.0, 1.0, 1.0), 0.92, 0.0, bark)
+	road = _std(Color(0.9, 0.9, 0.92), 0.86, 0.0, road)
+	metal = _std(Color(1.0, 1.0, 1.0), 0.42, 0.75, metal)
+	flesh = _std(Color(1.0, 1.0, 1.0), 0.78, 0.0, flesh)
+	hostile = _std(Color(1.0, 1.0, 1.0), 0.6, 0.0, hostile)
 	hostile.emission_enabled = true
 	hostile.emission = Color(1.0, 0.18, 0.12)
 	hostile.emission_energy_multiplier = 1.4
@@ -168,14 +185,14 @@ func rebuild(preset: int) -> void:
 	glass_emissive.emission_enabled = true
 	glass_emissive.emission = Color(1.0, 0.78, 0.45)
 	glass_emissive.emission_energy_multiplier = 2.5
-	debris = _std(Color(0.34, 0.33, 0.31), 0.9, 0.0, debris)
-	pickup = _std(Color(0.3, 0.8, 0.5), 0.35, 0.2, pickup)
+	debris = _std(Color(1.0, 1.0, 1.0), 0.9, 0.0, debris)
+	pickup = _std(Color(1.0, 1.0, 1.0), 0.35, 0.2, pickup)
 	pickup.emission_enabled = true
 	pickup.emission = Color(0.35, 1.0, 0.6)
 	pickup.emission_energy_multiplier = 1.8
-	vehicle_body = _std(Color(0.5, 0.5, 0.55), 0.32, 0.55, vehicle_body)
+	vehicle_body = _std(Color(1.0, 1.0, 1.0), 0.32, 0.5, vehicle_body)
 	vehicle_glass = _std(Color(0.08, 0.1, 0.13), 0.08, 0.3, vehicle_glass)
-	tracer = _std(Color(1.0, 0.85, 0.4), 0.4, 0.0, tracer)
+	tracer = _std(Color(1.0, 1.0, 1.0), 0.4, 0.0, tracer)
 	tracer.emission_enabled = true
 	tracer.emission = Color(1.0, 0.75, 0.3)
 	tracer.emission_energy_multiplier = 6.0

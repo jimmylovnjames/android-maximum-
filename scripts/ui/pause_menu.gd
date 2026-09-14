@@ -25,17 +25,17 @@ var _world: WorldManager = null
 
 func _ready() -> void:
 	name = "PauseMenu"
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
 
-	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.025, 0.035, 0.82)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)
+	var backdrop := _Backdrop.new()
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(backdrop)
 
 	var scroll := ScrollContainer.new()
-	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scroll.offset_left = 40
 	scroll.offset_right = -40
 	scroll.offset_top = 24
@@ -49,22 +49,23 @@ func _ready() -> void:
 	scroll.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UITheme.panel(12, UITheme.BG_SOLID))
-	panel.custom_minimum_size = Vector2(660, 0)
+	panel.add_theme_stylebox_override("panel",
+		UITheme.stylebox(UITheme.BG_SOLID, Color(1, 1, 1, 0.13), 10))
+	panel.custom_minimum_size = Vector2(700, 0)
 	center.add_child(panel)
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 7)
 	panel.add_child(col)
 
-	col.add_child(UITheme.heading("REDLINE", 30, UITheme.ACCENT))
+	col.add_child(_Title.new())
 	_info_label = UITheme.label("", 11, UITheme.TEXT_FAINT)
 	_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_info_label)
 	col.add_child(_sep())
 
 	# --- Stress -------------------------------------------------------------
-	col.add_child(UITheme.heading("STRESS LEVEL", 14))
+	col.add_child(_Section.new("STRESS LEVEL"))
 	var srow := HBoxContainer.new()
 	srow.add_theme_constant_override("separation", 5)
 	col.add_child(srow)
@@ -80,7 +81,7 @@ func _ready() -> void:
 
 	# --- Quality ------------------------------------------------------------
 	col.add_child(_sep())
-	col.add_child(UITheme.heading("QUALITY PRESET", 14))
+	col.add_child(_Section.new("QUALITY PRESET"))
 	var qrow := HBoxContainer.new()
 	qrow.add_theme_constant_override("separation", 5)
 	col.add_child(qrow)
@@ -105,7 +106,7 @@ func _ready() -> void:
 
 	# --- Interface ----------------------------------------------------------
 	col.add_child(_sep())
-	col.add_child(UITheme.heading("INTERFACE", 14))
+	col.add_child(_Section.new("INTERFACE"))
 	var irow := HBoxContainer.new()
 	irow.add_theme_constant_override("separation", 5)
 	col.add_child(irow)
@@ -134,7 +135,7 @@ func _ready() -> void:
 
 	# --- World --------------------------------------------------------------
 	col.add_child(_sep())
-	col.add_child(UITheme.heading("WORLD", 14))
+	col.add_child(_Section.new("WORLD"))
 	col.add_child(UITheme.label("TIME OF DAY", 11, UITheme.TEXT_FAINT))
 	_time_slider = HSlider.new()
 	_time_slider.min_value = 0.0
@@ -150,7 +151,7 @@ func _ready() -> void:
 
 	# --- Benchmark ----------------------------------------------------------
 	col.add_child(_sep())
-	col.add_child(UITheme.heading("BENCHMARK", 14))
+	col.add_child(_Section.new("BENCHMARK"))
 	var brow := HBoxContainer.new()
 	brow.add_theme_constant_override("separation", 5)
 	col.add_child(brow)
@@ -188,9 +189,59 @@ func _ready() -> void:
 		10, UITheme.TEXT_FAINT))
 
 
+## Backdrop: dimmed, with a faint technical grid so the menu sits on something
+## rather than floating over a flat wash.
+class _Backdrop extends Control:
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.016, 0.020, 0.028, 0.90), true)
+		var step: float = 44.0
+		var col := Color(1, 1, 1, 0.022)
+		var x: float = 0.0
+		while x < size.x:
+			draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
+			x += step
+		var y: float = 0.0
+		while y < size.y:
+			draw_line(Vector2(0, y), Vector2(size.x, y), col, 1.0)
+			y += step
+		draw_rect(Rect2(0, 0, size.x, 3), Color(1.0, 0.2, 0.16, 0.5), true)
+		draw_rect(Rect2(0, size.y - 3, size.x, 3), Color(1.0, 0.2, 0.16, 0.5), true)
+
+
+class _Title extends Control:
+	func _init() -> void:
+		custom_minimum_size = Vector2(0, 58)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		UITheme.draw_spaced(self, Vector2(0.0, 40.0), "REDLINE", 34,
+			Color(0.97, 0.97, 0.98), 10.0)
+		var w: float = 260.0
+		draw_rect(Rect2(0.0, 48.0, w, 2.0), UITheme.ACCENT, true)
+		UITheme.draw_text(self, Vector2(w + 12.0, 40.0), "PAUSED", 13,
+			UITheme.TEXT_FAINT)
+
+
+## Section heading: label plus a rule that runs to the edge of the panel.
+class _Section extends Control:
+	var title: String = ""
+
+	func _init(t: String) -> void:
+		title = t
+		custom_minimum_size = Vector2(0, 26)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var w: float = UITheme.draw_spaced(self, Vector2(0.0, 18.0), title, 11,
+			UITheme.ACCENT_2, 3.0)
+		draw_rect(Rect2(w + 14.0, 12.0, maxf(0.0, size.x - w - 14.0), 1.0),
+			Color(1, 1, 1, 0.10), true)
+
+
 func _sep() -> Control:
-	var s := HSeparator.new()
-	s.custom_minimum_size = Vector2(0, 6)
+	var s := Control.new()
+	s.custom_minimum_size = Vector2(0, 8)
+	s.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return s
 
 
@@ -209,11 +260,11 @@ func close() -> void:
 
 func refresh() -> void:
 	for i in _stress_buttons.size():
-		_stress_buttons[i].modulate = (Color(1, 1, 1) if i == StressDirector.level
-			else Color(0.6, 0.62, 0.66))
+		_mark_active(_stress_buttons[i], i == StressDirector.level,
+			UITheme.level_color(i))
 	for i in _quality_buttons.size():
-		_quality_buttons[i].modulate = (Color(1, 1, 1) if i == AdaptiveQualityManager.preset
-			else Color(0.6, 0.62, 0.66))
+		_mark_active(_quality_buttons[i], i == AdaptiveQualityManager.preset,
+			UITheme.ACCENT_2)
 	_auto_button.text = "AUTO RAMP: %s" % ("ON" if StressDirector.auto_mode else "OFF")
 	_adaptive_button.text = "ADAPTIVE: %s" % (
 		"ON" if AdaptiveQualityManager.adaptive_enabled else "OFF")
@@ -248,6 +299,19 @@ func refresh() -> void:
 			int(stress.get("stream_radius", 0)), float(stress.get("view_distance", 0.0)),
 			int(stress.get("cache_mb", 0))]
 	)
+
+
+## Selected options get a filled, accented box; the rest stay recessive. Using
+## modulate for this washes the label out along with the frame.
+func _mark_active(b: Button, active: bool, col: Color) -> void:
+	if active:
+		b.add_theme_stylebox_override("normal",
+			UITheme.stylebox(Color(col.r * 0.30, col.g * 0.30, col.b * 0.30, 0.95), col))
+		b.add_theme_color_override("font_color", Color.WHITE)
+	else:
+		b.add_theme_stylebox_override("normal",
+			UITheme.stylebox(Color(0.075, 0.088, 0.115, 0.95), Color(1, 1, 1, 0.10)))
+		b.add_theme_color_override("font_color", UITheme.TEXT_DIM)
 
 
 func _on_stress(i: int) -> void:

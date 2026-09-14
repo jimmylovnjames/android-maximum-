@@ -41,6 +41,43 @@ fi
 rm -f "$IMPORT_LOG"
 
 # ---------------------------------------------------------------------------
+say ""
+say "[1b] every script parses on its own"
+# --check-only runs without autoloads, so "Identifier not found: GameConfig"
+# and friends are expected here and are filtered out. Genuine syntax problems
+# surface as "Parse Error", which the whole-project import can mask behind a
+# single "could not parse global class" line.
+SYNTAX_BAD=0
+while IFS= read -r f; do
+  err="$("$GODOT" --headless --path "$ROOT" --check-only --script "$f" 2>&1 \
+    | grep "Parse Error" || true)"
+  if [ -n "$err" ]; then
+    bad "syntax error in $f"
+    printf '       %s\n' "$err" | head -3
+    SYNTAX_BAD=1
+  fi
+done < <(find "$ROOT/scripts" -name '*.gd' | sort)
+[ "$SYNTAX_BAD" -eq 0 ] && ok "all $(find "$ROOT/scripts" -name '*.gd' | wc -l) scripts parse"
+
+# ---------------------------------------------------------------------------
+say ""
+say "[1c] geometry, determinism and safety-cap self test"
+SELF="$("$GODOT" --headless --path "$ROOT" --selftest 2>&1 \
+  | awk '/REDLINE_SELFTEST_BEGIN/{f=1;next}/REDLINE_SELFTEST_END/{f=0}f')"
+if [ -z "$SELF" ]; then
+  bad "self test produced no report"
+else
+  python3 -c "
+import json,sys
+r = json.loads(sys.stdin.read())
+for key in ['mesh_orientation','collision_orientation','determinism','safety_caps']:
+    fails = r.get(key, [])
+    print(('OK|' if not fails else 'NO|') + key.replace('_',' ') + '|'
+          + (str(len(fails)) + ' failures: ' + str(fails[:2]) if fails else 'clean'))
+" <<<"$SELF" | report
+fi
+
+# ---------------------------------------------------------------------------
 run_smoke() {
   local label="$1"; shift
   local out

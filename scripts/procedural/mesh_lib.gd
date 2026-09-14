@@ -10,6 +10,13 @@ extends RefCounted
 static var _instance: MeshLib = null
 
 var meshes: Dictionary = {}
+## Meshes built from crossed cards. They enclose no volume, so the geometry
+## orientation self-test has nothing meaningful to measure on them; the
+## foliage shader renders them with cull_disabled anyway.
+var open_meshes: PackedStringArray = PackedStringArray([
+	"grass_l0", "grass_l1", "grass0_l0", "grass0_l1", "grass1_l0", "grass1_l1",
+	"grass2_l0", "grass2_l1", "fern", "flower",
+])
 var _mat: MaterialLib
 
 
@@ -49,87 +56,180 @@ func build(mat: MaterialLib) -> void:
 # Vegetation
 # -----------------------------------------------------------------------------
 func _build_trees() -> void:
-	# Conifer: tapered trunk plus three stacked canopy cones.
+	# --- Conifer ------------------------------------------------------------
+	# Trunk with a root flare, a ring of dead lower branches, and a stack of
+	# canopy tiers whose undersides are darkened in the vertex stream. The
+	# silhouette is what reads at distance; the flare and branches are what
+	# stop it looking like a cone on a stick up close.
 	for lod in 3:
-		var seg: int = [7, 5, 4][lod]
+		var seg: int = [9, 6, 4][lod]
 		var trunk := MeshBuilder.new()
-		trunk.add_cylinder(Vector3.ZERO, 6.4, 0.42, 0.18, seg, Color(0.30, 0.22, 0.15), true)
+		trunk.add_cylinder(Vector3.ZERO, 0.55, 0.72, 0.46, seg,
+			Color(0.34, 0.25, 0.17), false, false, 0.55)
+		trunk.add_cylinder(Vector3(0.0, 0.5, 0.0), 8.6, 0.46, 0.14, seg,
+			Color(0.44, 0.33, 0.22), true, false, 0.72)
+		if lod == 0:
+			for k in 7:
+				var a: float = TAU * float(k) / 7.0 + 0.4
+				var y: float = 2.0 + float(k) * 0.42
+				var xf := Transform3D(
+					Basis(Vector3(0, 1, 0), a) * Basis(Vector3(0, 0, 1), 2.05),
+					Vector3(cos(a) * 0.3, y, sin(a) * 0.3))
+				trunk.add_cylinder_xform(xf, 1.1 - float(k) * 0.06, 0.075, 0.03, 4,
+					Color(0.30, 0.23, 0.16), false, false)
 		var mesh: ArrayMesh = trunk.commit(null, _mat.bark)
+
 		var can := MeshBuilder.new()
-		var tiers: int = [3, 2, 1][lod]
+		var tiers: int = [7, 4, 2][lod]
 		for i in tiers:
-			var y: float = 2.4 + float(i) * 1.9
-			var r: float = 2.6 - float(i) * 0.55
-			var hgt: float = 3.4 - float(i) * 0.5
-			can.add_cone(Vector3(0.0, y, 0.0), hgt, r, seg + 1,
-				Color(0.11, 0.26 + 0.04 * float(i), 0.12), true)
-		can.commit(mesh, _mat.foliage)
+			var f: float = float(i) / float(maxi(tiers - 1, 1))
+			var y2: float = 2.1 + f * 6.2
+			var r: float = 2.85 * (1.0 - f * 0.82) + 0.25
+			var hgt: float = 2.3 * (1.0 - f * 0.4)
+			var tint: Color = Color(0.13, 0.30, 0.15).lerp(Color(0.26, 0.46, 0.22), f)
+			can.add_cone(Vector3(0.0, y2, 0.0), hgt, r, seg + 3, tint, true, 0.5)
+		can.commit(mesh, _mat.canopy)
 		meshes["pine_l%d" % lod] = mesh
 
-	# Broadleaf: short trunk, blob canopy.
+	# --- Broadleaf ----------------------------------------------------------
 	for lod in 3:
-		var seg2: int = [7, 5, 4][lod]
+		var seg2: int = [9, 6, 4][lod]
 		var sub: int = [2, 1, 0][lod]
-		var t2 := MeshBuilder.new()
-		t2.add_cylinder(Vector3.ZERO, 3.1, 0.38, 0.26, seg2, Color(0.33, 0.25, 0.18), true)
-		if lod == 0:
-			for b in 3:
-				var a: float = TAU * float(b) / 3.0
-				var xf := Transform3D(
-					Basis(Vector3(0, 1, 0), a) * Basis(Vector3(0, 0, 1), 0.6),
-					Vector3(cos(a) * 0.5, 2.7, sin(a) * 0.5)
-				)
-				t2.add_box_xform(xf, Vector3(0.18, 1.7, 0.18), Color(0.32, 0.24, 0.17))
-		var m2: ArrayMesh = t2.commit(null, _mat.bark)
-		var c2 := MeshBuilder.new()
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 1000 + lod
-		c2.add_blob(Vector3(0.0, 4.5, 0.0), Vector3(2.7, 2.1, 2.7), sub,
-			Color(0.17, 0.34, 0.14), rng, 0.22)
-		if lod == 0:
-			c2.add_blob(Vector3(1.5, 3.6, -0.8), Vector3(1.5, 1.2, 1.5), 1,
-				Color(0.14, 0.30, 0.12), rng, 0.26)
-			c2.add_blob(Vector3(-1.3, 3.9, 1.1), Vector3(1.4, 1.1, 1.4), 1,
-				Color(0.19, 0.37, 0.16), rng, 0.26)
-		c2.commit(m2, _mat.foliage)
+		var t2 := MeshBuilder.new()
+		t2.add_cylinder(Vector3.ZERO, 0.6, 0.82, 0.54, seg2,
+			Color(0.32, 0.24, 0.17), false, false, 0.5)
+		t2.add_cylinder(Vector3(0.0, 0.55, 0.0), 3.2, 0.54, 0.34, seg2,
+			Color(0.46, 0.35, 0.24), false, false, 0.7)
+		var tips: Array[Vector3] = []
+		var limbs: int = 5 if lod == 0 else 3
+		for b in limbs:
+			var a2: float = TAU * float(b) / float(limbs) + 0.7
+			var lean: float = 0.78 + float(b % 2) * 0.16
+			var len_b: float = 2.5 + float(b % 3) * 0.4
+			var base_p := Vector3(cos(a2) * 0.28, 3.3, sin(a2) * 0.28)
+			var xf2 := Transform3D(
+				Basis(Vector3(0, 1, 0), a2) * Basis(Vector3(0, 0, 1), lean), base_p)
+			t2.add_cylinder_xform(xf2, len_b, 0.24, 0.11, maxi(4, seg2 - 3),
+				Color(0.43, 0.33, 0.23), false, false)
+			var dir := Vector3(cos(a2) * sin(lean), cos(lean), sin(a2) * sin(lean))
+			tips.append(base_p + dir * len_b)
+		var m2: ArrayMesh = t2.commit(null, _mat.bark)
+
+		var c2 := MeshBuilder.new()
+		var leaf := Color(0.21, 0.42, 0.18)
+		c2.add_blob(Vector3(0.0, 5.1, 0.0), Vector3(2.5, 2.0, 2.5), sub,
+			leaf, rng, 0.26, 0.55)
+		for p: Vector3 in tips:
+			c2.add_blob(p + Vector3(0.0, 0.55, 0.0),
+				Vector3(1.55, 1.25, 1.55), maxi(sub - 1, 0),
+				leaf.lerp(Color(0.30, 0.52, 0.22), rng.randf()), rng, 0.3, 0.6)
+		c2.commit(m2, _mat.canopy)
 		meshes["broad_l%d" % lod] = m2
 
-	# Dead / burnt tree for REDLINE zones.
+	# --- Birch: pale trunk, sparse crown ------------------------------------
+	for lod in 2:
+		var seg3: int = [8, 5][lod]
+		var b3 := MeshBuilder.new()
+		b3.add_cylinder(Vector3.ZERO, 7.4, 0.3, 0.13, seg3,
+			Color(0.86, 0.86, 0.82), true, false, 0.8)
+		if lod == 0:
+			for k in 6:
+				var a3: float = float(k) * 1.13
+				var y3: float = 0.8 + float(k) * 1.0
+				b3.add_box(Vector3(-0.31, y3, -0.31 + sin(a3) * 0.1),
+					Vector3(0.62, 0.09, 0.12), Color(0.20, 0.19, 0.18))
+		var m3: ArrayMesh = b3.commit(null, _mat.bark)
+		var c3 := MeshBuilder.new()
+		var rng3 := RandomNumberGenerator.new()
+		rng3.seed = 2200 + lod
+		for k in (4 if lod == 0 else 2):
+			var a4: float = TAU * float(k) / 4.0
+			c3.add_blob(Vector3(cos(a4) * 0.9, 6.0 + float(k % 2) * 0.7, sin(a4) * 0.9),
+				Vector3(1.5, 1.1, 1.5), 1 - lod,
+				Color(0.36, 0.52, 0.20), rng3, 0.3, 0.5)
+		c3.commit(m3, _mat.canopy)
+		meshes["birch_l%d" % lod] = m3
+
+	# --- Dead / burnt -------------------------------------------------------
 	var dead := MeshBuilder.new()
-	dead.add_cylinder(Vector3.ZERO, 5.2, 0.36, 0.1, 5, Color(0.14, 0.12, 0.11), true)
-	for b in 4:
-		var a: float = TAU * float(b) / 4.0 + 0.4
-		var xf2 := Transform3D(
-			Basis(Vector3(0, 1, 0), a) * Basis(Vector3(0, 0, 1), 0.9),
-			Vector3(cos(a) * 0.8, 3.4 + float(b) * 0.35, sin(a) * 0.8)
-		)
-		dead.add_box_xform(xf2, Vector3(0.13, 2.2, 0.13), Color(0.12, 0.1, 0.09))
+	dead.add_cylinder(Vector3.ZERO, 0.5, 0.62, 0.42, 6,
+		Color(0.22, 0.19, 0.17), false, false, 0.5)
+	dead.add_cylinder(Vector3(0.0, 0.45, 0.0), 5.6, 0.4, 0.09, 6,
+		Color(0.31, 0.27, 0.24), true, false, 0.65)
+	for b in 6:
+		var a5: float = TAU * float(b) / 6.0 + 0.35
+		var xf3 := Transform3D(
+			Basis(Vector3(0, 1, 0), a5) * Basis(Vector3(0, 0, 1), 1.0 + float(b % 3) * 0.25),
+			Vector3(cos(a5) * 0.3, 2.6 + float(b) * 0.45, sin(a5) * 0.3))
+		dead.add_cylinder_xform(xf3, 1.6 + float(b % 2) * 0.6, 0.11, 0.03, 4,
+			Color(0.27, 0.23, 0.2), false, false)
 	meshes["dead_tree"] = dead.commit(null, _mat.bark)
+
+	# --- Forest floor debris ------------------------------------------------
+	var log_mesh := MeshBuilder.new()
+	var lxf := Transform3D(Basis(Vector3(0, 0, 1), PI * 0.5), Vector3(0.0, 0.42, 0.0))
+	log_mesh.add_cylinder_xform(lxf, 4.2, 0.42, 0.34, 8, Color(0.36, 0.28, 0.2), true, true)
+	meshes["log"] = log_mesh.commit(null, _mat.bark)
+
+	var stump := MeshBuilder.new()
+	stump.add_cylinder(Vector3.ZERO, 0.32, 0.78, 0.62, 8,
+		Color(0.30, 0.23, 0.16), false, false, 0.5)
+	stump.add_cylinder(Vector3(0.0, 0.3, 0.0), 0.75, 0.6, 0.55, 8,
+		Color(0.42, 0.32, 0.22), true, false, 0.7)
+	meshes["stump"] = stump.commit(null, _mat.bark)
 
 
 func _build_ground_cover() -> void:
-	# Grass cluster: three crossed cards at LOD0, one at LOD1.
-	for lod in 2:
-		var b := MeshBuilder.new()
-		var clumps: int = 3 if lod == 0 else 1
-		for i in clumps:
-			var ang: float = float(i) * 1.9
-			var off := Vector3(cos(ang) * 0.28, 0.0, sin(ang) * 0.28)
-			b.add_cross_card(off, 0.9, 0.85 - float(i) * 0.08,
-				Color(0.13, 0.21, 0.09), Color(0.34, 0.50, 0.18), ang)
-		meshes["grass_l%d" % lod] = b.commit(null, _mat.grass)
+	# Three grass clusters of different height and hue. Scattering a mix
+	# instead of one repeated card is most of what stops ground cover reading
+	# as a tiled pattern.
+	var variants: Array[Dictionary] = [
+		{"clumps": 4, "w": 0.72, "h": 0.78,
+			"bottom": Color(0.15, 0.22, 0.08), "top": Color(0.52, 0.68, 0.26)},
+		{"clumps": 3, "w": 0.88, "h": 1.15,
+			"bottom": Color(0.13, 0.20, 0.07), "top": Color(0.44, 0.60, 0.21)},
+		{"clumps": 5, "w": 0.6, "h": 0.55,
+			"bottom": Color(0.18, 0.25, 0.10), "top": Color(0.60, 0.72, 0.32)},
+	]
+	for v in variants.size():
+		var cfg: Dictionary = variants[v]
+		for lod in 2:
+			var b := MeshBuilder.new()
+			var clumps: int = int(cfg["clumps"]) if lod == 0 else 1
+			for i in clumps:
+				var ang: float = float(i) * 1.77 + float(v)
+				var off := Vector3(cos(ang) * 0.2, 0.0, sin(ang) * 0.2)
+				b.add_cross_card(off, float(cfg["w"]),
+					float(cfg["h"]) * (1.0 - float(i) * 0.07),
+					cfg["bottom"], cfg["top"], ang)
+			meshes["grass%d_l%d" % [v, lod]] = b.commit(null, _mat.grass)
+	# Legacy keys, so any batch still asking for "grass_l*" resolves.
+	meshes["grass_l0"] = meshes["grass0_l0"]
+	meshes["grass_l1"] = meshes["grass0_l1"]
+
+	var flower := MeshBuilder.new()
+	for i in 3:
+		var a: float = float(i) * 2.1
+		flower.add_cross_card(Vector3(cos(a) * 0.14, 0.0, sin(a) * 0.14), 0.3, 0.42,
+			Color(0.20, 0.30, 0.12), Color(0.86, 0.82, 0.42), a)
+	meshes["flower"] = flower.commit(null, _mat.grass)
 
 	var bush := MeshBuilder.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
-	bush.add_blob(Vector3(0.0, 0.55, 0.0), Vector3(0.95, 0.7, 0.95), 1,
-		Color(0.15, 0.30, 0.13), rng, 0.3)
-	meshes["bush"] = bush.commit(null, _mat.foliage)
+	bush.add_blob(Vector3(0.0, 0.48, 0.0), Vector3(0.85, 0.62, 0.85), 1,
+		Color(0.20, 0.38, 0.17), rng, 0.32, 0.6)
+	bush.add_blob(Vector3(0.42, 0.36, -0.28), Vector3(0.5, 0.4, 0.5), 1,
+		Color(0.24, 0.42, 0.19), rng, 0.32, 0.6)
+	meshes["bush"] = bush.commit(null, _mat.canopy)
 
 	var fern := MeshBuilder.new()
-	for i in 5:
-		fern.add_cross_card(Vector3(cos(float(i) * 1.3) * 0.2, 0.0, sin(float(i) * 1.3) * 0.2),
-			1.3, 0.75, Color(0.10, 0.23, 0.10), Color(0.22, 0.42, 0.16), float(i) * 0.7)
+	for i in 6:
+		fern.add_cross_card(Vector3(cos(float(i) * 1.1) * 0.22, 0.0,
+			sin(float(i) * 1.1) * 0.22), 1.15, 0.66,
+			Color(0.13, 0.24, 0.10), Color(0.32, 0.50, 0.20), float(i) * 0.62)
 	meshes["fern"] = fern.commit(null, _mat.grass)
 
 
@@ -138,14 +238,16 @@ func _build_rocks() -> void:
 		var b := MeshBuilder.new()
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 777 + lod
-		b.add_blob(Vector3(0.0, 0.5, 0.0), Vector3(1.1, 0.8, 1.0),
-			2 - lod, Color(0.30, 0.29, 0.28), rng, 0.34)
+		# Centred at half its own height so the rock rests on the ground
+		# instead of being buried to its waist.
+		b.add_blob(Vector3(0.0, 0.62, 0.0), Vector3(1.0, 0.66, 0.95),
+			2 - lod, Color(0.34, 0.33, 0.31), rng, 0.38)
 		meshes["rock_l%d" % lod] = b.commit(null, _mat.prop)
 	var boulder := MeshBuilder.new()
 	var rng2 := RandomNumberGenerator.new()
 	rng2.seed = 991
-	boulder.add_blob(Vector3(0.0, 1.6, 0.0), Vector3(2.6, 2.0, 2.4), 2,
-		Color(0.27, 0.26, 0.26), rng2, 0.3)
+	boulder.add_blob(Vector3(0.0, 1.7, 0.0), Vector3(2.3, 1.8, 2.2), 2,
+		Color(0.31, 0.30, 0.29), rng2, 0.32)
 	meshes["boulder"] = boulder.commit(null, _mat.prop)
 
 
@@ -278,12 +380,13 @@ func _build_vehicles() -> void:
 	glass.add_box(Vector3(-1.05, 1.1, -0.74), Vector3(2.0, 0.5, 1.48), Color(0.1, 0.12, 0.16))
 	glass.commit(carm, _mat.vehicle_glass)
 	var wheels := MeshBuilder.new()
-	for sx in [-1.35, 1.35]:
-		for sz in [-0.92, 0.92]:
-			var xf := Transform3D(Basis(Vector3(1, 0, 0), PI * 0.5),
+	for sx: float in [-1.35, 1.35]:
+		for sz: float in [-0.9, 0.9]:
+			# Rotate about Z so the cylinder axis runs across the vehicle.
+			var xf := Transform3D(Basis(Vector3(0, 0, 1), PI * 0.5),
 				Vector3(sx, 0.36, sz))
-			wheels.add_cylinder(xf.origin + Vector3(0, 0, -0.1), 0.2, 0.36, 0.36, 8,
-				Color(0.08, 0.08, 0.09), true, true)
+			wheels.add_cylinder_xform(xf, 0.22, 0.36, 0.36, 10,
+				Color(0.09, 0.09, 0.10), true, true)
 	wheels.commit(carm, _mat.metal)
 	meshes["car"] = carm
 
@@ -293,16 +396,25 @@ func _build_vehicles() -> void:
 	truck.add_box(Vector3(-0.9, 1.1, -1.12), Vector3(4.4, 2.0, 2.24), Color(0.62, 0.63, 0.66))
 	var truckm: ArrayMesh = truck.commit(null, _mat.vehicle_body)
 	var tw := MeshBuilder.new()
-	for sx in [-2.6, 1.0, 2.3]:
-		for sz in [-1.2, 1.2]:
-			tw.add_cylinder(Vector3(sx, 0.5, sz - 0.12), 0.24, 0.5, 0.5, 8,
-				Color(0.08, 0.08, 0.09), true, true)
+	for sx: float in [-2.6, 1.0, 2.3]:
+		for sz: float in [-1.16, 1.16]:
+			var xf2 := Transform3D(Basis(Vector3(0, 0, 1), PI * 0.5),
+				Vector3(sx, 0.5, sz))
+			tw.add_cylinder_xform(xf2, 0.26, 0.5, 0.5, 10,
+				Color(0.09, 0.09, 0.10), true, true)
 	tw.commit(truckm, _mat.metal)
 	meshes["truck"] = truckm
 
 	var wreck := MeshBuilder.new()
-	wreck.add_box(Vector3(-2.0, 0.3, -0.85), Vector3(4.0, 0.5, 1.7), Color(0.28, 0.24, 0.22))
-	wreck.add_box(Vector3(-0.9, 0.8, -0.7), Vector3(1.6, 0.4, 1.4), Color(0.22, 0.19, 0.18))
+	wreck.add_box(Vector3(-2.0, 0.34, -0.82), Vector3(4.0, 0.6, 1.64), Color(0.34, 0.28, 0.25))
+	wreck.add_box(Vector3(-1.0, 0.94, -0.72), Vector3(1.9, 0.62, 1.44), Color(0.27, 0.22, 0.2))
+	wreck.add_box(Vector3(1.0, 0.5, -0.86), Vector3(0.9, 0.5, 1.72), Color(0.22, 0.17, 0.15))
+	for sx: float in [-1.3, 1.25]:
+		for sz: float in [-0.86, 0.86]:
+			var wxf := Transform3D(Basis(Vector3(0, 0, 1), PI * 0.5),
+				Vector3(sx, 0.34, sz))
+			wreck.add_cylinder_xform(wxf, 0.2, 0.34, 0.34, 8,
+				Color(0.12, 0.11, 0.11), true, true)
 	meshes["wreck"] = wreck.commit(null, _mat.debris)
 
 

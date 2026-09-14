@@ -9,9 +9,9 @@ extends Node3D
 
 ## Base draw distances per batch category, before the LOD bias is applied.
 const CATEGORY_RANGE: Dictionary = {
-	"grass": 58.0,
-	"bush": 95.0,
-	"tree": 280.0,
+	"grass": 52.0,
+	"bush": 110.0,
+	"tree": 320.0,
 	"prop": 190.0,
 	"detail": 130.0,
 	"building": 1200.0,
@@ -162,6 +162,12 @@ func apply_lod(lod_bias: float, view_distance: float, fade: bool) -> void:
 			end2 = maxf(base, view_distance)
 		mmi.visibility_range_begin = 0.0
 		mmi.visibility_range_end = end2
+		# Ground cover always fades rather than popping: it is the category
+		# whose cull edge sits closest to the camera.
+		if batch.category == "grass":
+			mmi.visibility_range_end_margin = end2 * 0.22
+			mmi.visibility_range_fade_mode = \
+				GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		mmi.visibility_range_fade_mode = (
 			fade_mode as GeometryInstance3D.VisibilityRangeFadeMode)
 
@@ -203,8 +209,20 @@ func visible_instances() -> int:
 	return n
 
 
-## Building floor modules currently drawn, reported to the HUD so the urban
-## geometry load is visible as a number rather than a vibe.
+## Instances currently drawn, broken down by batch category. Reported to the
+## HUD so the geometry load is a number rather than a vibe, and so a category
+## that silently stops drawing is visible immediately.
+func accumulate_category_counts(out: Dictionary) -> void:
+	if not realized:
+		return
+	for key: String in _batch_nodes.keys():
+		var batch: InstanceBatch = data.batches[key]
+		var mm: MultiMesh = (_batch_nodes[key] as MultiMeshInstance3D).multimesh
+		var n: int = (mm.visible_instance_count if mm.visible_instance_count >= 0
+			else mm.instance_count)
+		out[batch.category] = int(out.get(batch.category, 0)) + n
+
+
 func visible_building_modules() -> int:
 	var n: int = 0
 	for key: String in _batch_nodes.keys():

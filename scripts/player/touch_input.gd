@@ -34,12 +34,13 @@ var _stick_area: Rect2
 var _buttons: Array[Dictionary] = []
 var _pressed_buttons: Dictionary = {}      ## finger -> button index
 var _enabled: bool = true
+var _look_hint: float = 5.0
 
 
 func _ready() -> void:
 	name = "TouchInput"
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	_rebuild_layout()
 	get_viewport().size_changed.connect(_rebuild_layout)
@@ -117,6 +118,12 @@ func _rebuild_layout() -> void:
 	queue_redraw()
 
 
+func _process(delta: float) -> void:
+	if _look_hint > 0.0:
+		_look_hint -= delta
+		queue_redraw()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not _enabled:
 		return
@@ -145,6 +152,7 @@ func _handle_touch(t: InputEventScreenTouch) -> void:
 		if _look_finger < 0:
 			_look_finger = t.index
 			_look_last = t.position
+			_look_hint = 0.0
 			get_viewport().set_input_as_handled()
 	else:
 		if _pressed_buttons.has(t.index):
@@ -223,12 +231,29 @@ func take_look_delta() -> Vector2:
 func _draw() -> void:
 	if not _enabled:
 		return
-	var accent := Color(1, 1, 1, 0.16)
-	draw_circle(_stick_origin, STICK_RADIUS, Color(1, 1, 1, 0.06))
-	draw_arc(_stick_origin, STICK_RADIUS, 0.0, TAU, 48, accent, 2.0, true)
-	var knob: Vector2 = _stick_origin + (_stick_pos - _stick_origin).limit_length(STICK_RADIUS)
-	draw_circle(knob, 40.0, Color(1, 1, 1, 0.18))
-	draw_arc(knob, 40.0, 0.0, TAU, 28, Color(1, 1, 1, 0.35), 2.0, true)
+	var active: bool = _stick_finger >= 0
+
+	# Stick: outer ring, a dead-zone marker, and a lead line to the knob so the
+	# current direction is readable at a glance with a thumb over the control.
+	draw_circle(_stick_origin, STICK_RADIUS, Color(0, 0, 0, 0.20))
+	draw_arc(_stick_origin, STICK_RADIUS, 0.0, TAU, 48,
+		Color(1, 1, 1, 0.24 if active else 0.14), 2.0, true)
+	draw_arc(_stick_origin, STICK_RADIUS * STICK_DEAD, 0.0, TAU, 20,
+		Color(1, 1, 1, 0.10), 1.0, true)
+	for i in 4:
+		var a: float = TAU * float(i) / 4.0
+		var d := Vector2(cos(a), sin(a))
+		draw_line(_stick_origin + d * (STICK_RADIUS - 10.0),
+			_stick_origin + d * STICK_RADIUS, Color(1, 1, 1, 0.18), 1.5)
+
+	var knob: Vector2 = _stick_origin + (_stick_pos - _stick_origin).limit_length(
+		STICK_RADIUS)
+	if active:
+		draw_line(_stick_origin, knob, Color(0.33, 0.78, 0.96, 0.35), 2.0)
+	draw_circle(knob, 38.0, Color(0.04, 0.05, 0.07, 0.55))
+	draw_arc(knob, 38.0, 0.0, TAU, 28,
+		Color(0.33, 0.78, 0.96, 0.9) if active else Color(1, 1, 1, 0.3), 2.0, true)
+	draw_circle(knob, 4.0, Color(1, 1, 1, 0.55 if active else 0.3))
 
 	var held_ids: Array = []
 	for f: int in _pressed_buttons.keys():
@@ -240,10 +265,27 @@ func _draw() -> void:
 		var id: String = b["id"]
 		var down: bool = held_ids.has(id) or (id == "sprint" and sprint_held)
 		var r: float = float(b["r"])
-		draw_circle(b["pos"], r, Color(c.r, c.g, c.b, 0.20 if down else 0.10))
-		draw_arc(b["pos"], r, 0.0, TAU, 32, Color(c.r, c.g, c.b, 0.75 if down else 0.4),
-			2.0, true)
+		var pos: Vector2 = b["pos"]
+		draw_circle(pos, r, Color(0.03, 0.04, 0.055, 0.55 if down else 0.38))
+		draw_circle(pos, r, Color(c.r, c.g, c.b, 0.22 if down else 0.08))
+		# Two-arc ring: a full faint ring plus a bright arc that closes when
+		# the control is active, so state reads without colour alone.
+		draw_arc(pos, r, 0.0, TAU, 36, Color(c.r, c.g, c.b, 0.3), 1.5, true)
+		draw_arc(pos, r, -PI * 0.5, -PI * 0.5 + (TAU if down else TAU * 0.28), 32,
+			Color(c.r, c.g, c.b, 0.95 if down else 0.55), 2.5, true)
 		var label: String = b["label"]
-		var sz: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15)
-		draw_string(font, b["pos"] - Vector2(sz.x * 0.5, -5.0), label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 1, 1, 0.85))
+		var fs: int = 15 if r > 34.0 else 13
+		var sz: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+		draw_string(font, pos - Vector2(sz.x * 0.5, -5.0), label,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
+			Color(1, 1, 1, 0.95 if down else 0.8))
+
+	# Look-area hint on first use, so the right half of the screen is
+	# discoverable without a tutorial.
+	if _look_hint > 0.0:
+		var vs: Vector2 = get_viewport_rect().size
+		var a: float = clampf(_look_hint, 0.0, 1.0) * 0.5
+		var centre := Vector2(vs.x * 0.74, vs.y * 0.42)
+		draw_arc(centre, 46.0, 0.0, TAU, 40, Color(1, 1, 1, a * 0.4), 1.5, true)
+		draw_string(font, centre - Vector2(38.0, -4.0), "DRAG TO LOOK",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, a))

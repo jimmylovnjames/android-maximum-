@@ -31,7 +31,7 @@ func setup(mat: MaterialLib) -> void:
 
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
-	sun.light_energy = 1.35
+	sun.light_energy = 1.05
 	sun.light_color = Color(1.0, 0.96, 0.88)
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
@@ -40,8 +40,12 @@ func setup(mat: MaterialLib) -> void:
 	sun.directional_shadow_split_1 = 0.06
 	sun.directional_shadow_split_2 = 0.16
 	sun.directional_shadow_split_3 = 0.42
-	sun.shadow_bias = 0.035
-	sun.shadow_normal_bias = 1.4
+	sun.shadow_bias = 0.028
+	sun.shadow_normal_bias = 1.1
+	# A non-zero angular diameter softens shadow edges with distance, which is
+	# most of what sells outdoor lighting and costs nothing extra.
+	sun.light_angular_distance = 0.65
+	sun.light_specular = 0.8
 	add_child(sun)
 
 	moon = DirectionalLight3D.new()
@@ -60,28 +64,48 @@ func setup(mat: MaterialLib) -> void:
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.ambient_light_sky_contribution = 1.0
-	environment.ambient_light_energy = 1.0
+	environment.ambient_light_sky_contribution = 0.85
+	environment.ambient_light_energy = 0.5
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
-	environment.tonemap_white = 6.0
+	environment.tonemap_white = 3.2
 	environment.fog_enabled = true
 	environment.fog_mode = Environment.FOG_MODE_DEPTH
 	environment.fog_light_color = Color(0.62, 0.68, 0.76)
 	environment.fog_light_energy = 1.0
-	environment.fog_sun_scatter = 0.22
-	environment.fog_density = 0.0018
-	environment.fog_aerial_perspective = 0.45
-	environment.fog_sky_affect = 0.28
+	environment.fog_sun_scatter = 0.14
+	environment.fog_density = 0.0011
+	environment.fog_aerial_perspective = 0.22
+	environment.fog_sky_affect = 0.12
 	environment.fog_depth_begin = 60.0
 	environment.fog_depth_end = 1600.0
-	environment.fog_depth_curve = 1.4
+	environment.fog_depth_curve = 1.35
+	# Ground mist. Depth fog alone makes distance hazy; height fog is what puts
+	# a layer in the valleys and between the trees.
+	environment.fog_height = 6.0
+	environment.fog_height_density = 0.055
 	environment.glow_enabled = true
 	environment.glow_intensity = 0.55
 	environment.glow_strength = 1.0
 	environment.glow_bloom = 0.12
 	environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	environment.glow_hdr_threshold = 1.05
+	environment.glow_hdr_threshold = 0.95
+	environment.glow_hdr_scale = 2.0
+	# Weight the wider blur levels so bloom is a soft halo, not a hard ring.
+	environment.set_glow_level(1, 0.2)
+	environment.set_glow_level(2, 0.6)
+	environment.set_glow_level(3, 1.0)
+	environment.set_glow_level(4, 0.9)
+	environment.set_glow_level(5, 0.5)
+	environment.set_glow_level(6, 0.25)
+	environment.set_glow_level(7, 0.1)
+
+	# Film-style grade. Supported by the mobile renderer because it happens in
+	# the tonemap pass rather than as a separate screen-space effect.
+	environment.adjustment_enabled = true
+	environment.adjustment_brightness = 1.0
+	environment.adjustment_contrast = 1.14
+	environment.adjustment_saturation = 1.12
 
 	env_node = WorldEnvironment.new()
 	env_node.name = "WorldEnvironment"
@@ -109,7 +133,7 @@ func apply_profile(profile: Dictionary) -> void:
 	if environment != null:
 		environment.glow_enabled = _glow
 		environment.fog_enabled = _fog_detail > 0
-		environment.fog_aerial_perspective = 0.2 + 0.3 * float(_fog_detail)
+		environment.fog_aerial_perspective = 0.12 + 0.1 * float(_fog_detail)
 		environment.fog_depth_end = maxf(600.0,
 			float(profile.get("view_distance", 900.0)) * 1.1)
 
@@ -127,6 +151,11 @@ func advance(delta: float) -> void:
 
 func set_storm_blend(v: float) -> void:
 	_storm_blend = clampf(v, 0.0, 1.0)
+	if _mat != null and _mat.sky_material != null:
+		_mat.sky_material.set_shader_parameter("cloud_cover",
+			lerpf(0.38, 0.95, _storm_blend))
+		_mat.sky_material.set_shader_parameter("cloud_sharpness",
+			lerpf(4.5, 2.2, _storm_blend))
 
 
 func _process(delta: float) -> void:
@@ -152,19 +181,24 @@ func _update(_force: bool) -> void:
 	var warm := Color(1.0, 0.62, 0.34)
 	var noon := Color(1.0, 0.97, 0.9)
 	sun.light_color = noon.lerp(warm, dusk)
-	sun.light_energy = clampf(elev * 1.9 + 0.12, 0.0, 1.7) * (1.0 - _storm_blend * 0.6)
+	sun.light_energy = clampf(elev * 1.35 + 0.06, 0.0, 1.15) * (1.0 - _storm_blend * 0.6)
 	sun.visible = sun.light_energy > 0.005
 	moon.light_energy = 0.18 * night_factor
 	moon.visible = moon.light_energy > 0.005
 
 	if environment != null:
-		var day_fog := Color(0.62, 0.70, 0.80)
+		var day_fog := Color(0.55, 0.64, 0.76)
 		var dusk_fog := Color(0.72, 0.42, 0.26)
 		var night_fog := Color(0.05, 0.06, 0.10)
 		var fc: Color = day_fog.lerp(dusk_fog, dusk * 0.8).lerp(night_fog, night_factor)
 		environment.fog_light_color = fc.lerp(Color(0.42, 0.44, 0.48), _storm_blend * 0.7)
-		environment.fog_density = lerpf(0.0016, 0.0055, _storm_blend) * (1.0 + night_factor * 0.4)
-		environment.ambient_light_energy = lerpf(1.0, 0.28, night_factor)
+		environment.fog_density = lerpf(0.0010, 0.0042, _storm_blend) * (1.0 + night_factor * 0.4)
+		environment.ambient_light_energy = lerpf(0.62, 0.16, night_factor)
+		environment.fog_height_density = lerpf(0.05, 0.16, _storm_blend) \
+			* lerpf(1.0, 2.1, night_factor)
+		environment.fog_height = lerpf(7.0, 2.5, _storm_blend)
+		environment.adjustment_saturation = lerpf(1.12, 0.86, night_factor)
+		environment.adjustment_contrast = lerpf(1.14, 1.22, night_factor)
 		environment.glow_intensity = lerpf(0.45, 0.95, night_factor) if _glow else 0.0
 
 	GameConfig.set_shader_global("redline_night", night_factor)

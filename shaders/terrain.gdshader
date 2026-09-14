@@ -8,6 +8,7 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
 uniform sampler2D detail_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D macro_tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D detail_normal : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform vec4 rock_color : source_color = vec4(0.32, 0.30, 0.29, 1.0);
 uniform vec4 sand_color : source_color = vec4(0.62, 0.56, 0.40, 1.0);
 uniform vec4 wet_color : source_color = vec4(0.20, 0.22, 0.20, 1.0);
@@ -17,7 +18,9 @@ uniform float rock_slope = 0.62;
 uniform float rock_blend = 0.18;
 uniform float water_level = -6.0;
 uniform float roughness_base = 0.94;
-uniform float detail_strength = 0.45;
+uniform float detail_strength = 0.36;
+uniform float normal_strength = 0.85;
+uniform float macro_variation = 0.42;
 
 global uniform float redline_wetness;
 
@@ -38,24 +41,46 @@ void fragment() {
 	vec3 macro = texture(macro_tex, muv).rgb;
 
 	vec3 base = COLOR.rgb;
-	// Macro noise gently varies the biome tint so large areas are not flat.
-	base *= mix(0.82, 1.18, macro.r);
+	// COLOR.a is how built-up this vertex is. Organic hue variation is for
+	// soil and grass; concrete and asphalt only get brightness variation.
+	float organic = 1.0 - COLOR.a;
+	float m = macro.r;
+	base *= mix(1.0 - macro_variation * mix(0.45, 1.0, organic),
+		1.0 + macro_variation * 0.75 * mix(0.45, 1.0, organic), m);
+	base = mix(base, base * vec3(1.25, 1.05, 0.7),
+		clamp((m - 0.55) * 1.8, 0.0, 1.0) * 0.55 * organic);
+	base = mix(base, base * vec3(0.72, 0.92, 0.78),
+		clamp((0.45 - m) * 1.8, 0.0, 1.0) * 0.5 * organic);
 	// Detail noise adds close-range break-up.
-	base *= mix(1.0 - detail_strength, 1.0 + detail_strength, detail.g);
+	base *= mix(1.0 - detail_strength * mix(0.5, 1.0, organic),
+		1.0 + detail_strength * mix(0.5, 1.0, organic), detail.g);
 
 	float rock_mask = smoothstep(rock_slope - rock_blend, rock_slope + rock_blend, v_slope);
-	rock_mask = clamp(rock_mask + (detail.b - 0.5) * 0.25, 0.0, 1.0);
+	rock_mask = clamp(rock_mask + (detail.b - 0.5) * 0.25, 0.0, 1.0) * organic;
 	base = mix(base, rock_color.rgb * mix(0.8, 1.2, detail.r), rock_mask);
 
 	float shore = 1.0 - smoothstep(water_level, water_level + 3.5, v_world.y);
-	base = mix(base, sand_color.rgb, shore * 0.75);
+	base = mix(base, sand_color.rgb, shore * 0.75 * organic);
 
 	// Rain darkens and slickens the ground.
 	float wet = clamp(redline_wetness, 0.0, 1.0);
 	base = mix(base, base * 0.55 + wet_color.rgb * 0.25, wet * 0.7);
 
+	// Surface normal detail at two scales. A single lookup tiles visibly as
+	// diagonal streaking across open ground; crossing two rates breaks it up
+	// for one extra sample.
+	vec3 n_near = texture(detail_normal, duv * 0.9).xyz;
+	vec3 n_far = texture(detail_normal, duv * 0.21 + vec2(0.37, 0.11)).xyz;
+	NORMAL_MAP = normalize(mix(n_near, n_far, 0.45) * 2.0 - 1.0) * 0.5 + 0.5;
+	// Paved ground is smoother than soil.
+	NORMAL_MAP_DEPTH = normal_strength * mix(1.0, 0.45, wet) * mix(0.35, 1.0, organic);
+
+	// Slopes read darker, which is what makes the relief legible at distance.
+	base *= mix(1.0, 0.78, clamp(v_slope * 1.4, 0.0, 1.0));
+
 	ALBEDO = base;
-	ROUGHNESS = mix(roughness_base, 0.28, wet * 0.8) * mix(1.0, 0.82, rock_mask);
+	ROUGHNESS = mix(roughness_base, 0.28, wet * 0.8) * mix(1.0, 0.82, rock_mask)
+		* mix(0.86, 1.0, organic);
 	SPECULAR = mix(0.18, 0.45, wet);
 	METALLIC = 0.0;
 }

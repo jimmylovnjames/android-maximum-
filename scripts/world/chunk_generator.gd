@@ -273,13 +273,20 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
 	var ox: float = d.origin.x
 	var oz: float = d.origin.z
 
-	# --- Grass / ground cover -------------------------------------------------
+	# --- Ground cover -------------------------------------------------------
+	# Three grass batches plus flowers. Mixing variants per instance is what
+	# stops a field reading as one card stamped in a grid.
 	var gstep: float = clampf(d.veg_step, 0.6, 4.0)
 	var gw: int = maxi(2, int(GameConfig.CHUNK_SIZE / gstep))
 	var gtotal: int = gw * gw
-	var grass: InstanceBatch = _batch(d, "grass",
-		PackedStringArray(["grass_l0", "grass_l1"]), "grass", false)
-	grass.reserve(gtotal)
+	var grass_batches: Array[InstanceBatch] = []
+	for v in 3:
+		grass_batches.append(_batch(d, "grass%d" % v,
+			PackedStringArray(["grass%d_l0" % v, "grass%d_l1" % v]), "grass", false))
+		grass_batches[v].reserve(gtotal / 2)
+	var flowers: InstanceBatch = _batch(d, "flower",
+		PackedStringArray(["flower"]), "grass", false)
+
 	for k in gtotal:
 		var pi: int = _permuted(k, gtotal)
 		var gi: int = pi % gw
@@ -290,43 +297,61 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			0.0, gstep)
 		var wx: float = ox + float(gi) * gstep + jx
 		var wz: float = oz + float(gj) * gstep + jz
-		var dens: float = gen.grass_density_at(wx, wz, field.h(wx, wz), field.slope(wx, wz))
+		var gh: float = field.h(wx, wz)
+		var dens: float = gen.grass_density_at(wx, wz, gh, field.slope(wx, wz))
 		if dens <= 0.02:
 			continue
-		if WorldGen.hash_f(int(wx * 8.0), int(wz * 8.0), 13) > dens:
+		var roll_g: float = WorldGen.hash_f(int(wx * 8.0), int(wz * 8.0), 13)
+		if roll_g > dens:
 			continue
-		var h: float = field.h(wx, wz)
-		var s: float = WorldGen.hash_range(int(wx * 4.0), int(wz * 4.0), 14, 0.7, 1.45)
-		var tint: float = WorldGen.hash_range(int(wx * 4.0), int(wz * 4.0), 15, 0.75, 1.2)
-		grass.add_simple(
-			Vector3(wx - ox, h, wz - oz),
-			WorldGen.hash_range(int(wx), int(wz), 16, 0.0, TAU),
-			Vector3(s, s * WorldGen.hash_range(int(wx), int(wz), 17, 0.8, 1.5), s),
-			Color(0.55 * tint, 0.72 * tint, 0.38 * tint, 1.0),
-			Color(WorldGen.hash_f(int(wx), int(wz), 18), 0.0, 0.0, 0.0)
-		)
+		var s: float = WorldGen.hash_range(int(wx * 4.0), int(wz * 4.0), 14, 0.75, 1.5)
+		var tint: float = WorldGen.hash_range(int(wx * 4.0), int(wz * 4.0), 15, 0.72, 1.22)
+		var moist: float = gen.moisture(wx, wz)
+		# Drier ground skews yellow, damper ground skews blue-green.
+		var col := Color(
+			(0.95 + (0.5 - moist) * 0.4) * tint,
+			(1.0 + (moist - 0.5) * 0.12) * tint,
+			(0.72 + moist * 0.45) * tint, 1.0)
+		var pos := Vector3(wx - ox, gh, wz - oz)
+		var yaw: float = WorldGen.hash_range(int(wx), int(wz), 16, 0.0, TAU)
+		var custom := Color(WorldGen.hash_f(int(wx), int(wz), 18), 0.0, 0.0, 0.0)
+		if roll_g < dens * 0.06 and richness > 0.4:
+			flowers.add_simple(pos, yaw, Vector3(s, s, s), col * 1.1, custom)
+		else:
+			var v2: int = WorldGen.hash_i(int(wx * 3.0), int(wz * 3.0), 19) % 3
+			grass_batches[v2].add_simple(pos, yaw,
+				Vector3(s, s * WorldGen.hash_range(int(wx), int(wz), 17, 0.85, 1.5), s),
+				col, custom)
 
-	# --- Trees ----------------------------------------------------------------
-	var tstep: float = 5.0
+	# --- Trees --------------------------------------------------------------
+	var tstep: float = 4.4
 	var tw: int = maxi(2, int(GameConfig.CHUNK_SIZE / tstep))
 	var ttotal: int = tw * tw
 	var pine: InstanceBatch = _batch(d, "pine",
 		PackedStringArray(["pine_l0", "pine_l1", "pine_l2"]), "tree", true)
 	var broad: InstanceBatch = _batch(d, "broad",
 		PackedStringArray(["broad_l0", "broad_l1", "broad_l2"]), "tree", true)
+	var birch: InstanceBatch = _batch(d, "birch",
+		PackedStringArray(["birch_l0", "birch_l1", "birch_l1"]), "tree", true)
 	var dead: InstanceBatch = _batch(d, "dead_tree",
 		PackedStringArray(["dead_tree"]), "tree", true)
 	var bush: InstanceBatch = _batch(d, "bush",
 		PackedStringArray(["bush", "bush"]), "bush", false)
+	var fern: InstanceBatch = _batch(d, "fern",
+		PackedStringArray(["fern"]), "bush", false)
+	var logs: InstanceBatch = _batch(d, "log",
+		PackedStringArray(["log"]), "prop", true)
+	var stumps: InstanceBatch = _batch(d, "stump",
+		PackedStringArray(["stump"]), "prop", true)
 
 	for k in ttotal:
 		var pi2: int = _permuted(k, ttotal)
 		var ti: int = pi2 % tw
 		var tj: int = pi2 / tw
 		var bx: float = ox + float(ti) * tstep + WorldGen.hash_range(
-			d.coord.x * 977 + ti, d.coord.y * 977 + tj, 21, 0.3, tstep - 0.3)
+			d.coord.x * 977 + ti, d.coord.y * 977 + tj, 21, 0.25, tstep - 0.25)
 		var bz: float = oz + float(tj) * tstep + WorldGen.hash_range(
-			d.coord.x * 977 + ti, d.coord.y * 977 + tj, 22, 0.3, tstep - 0.3)
+			d.coord.x * 977 + ti, d.coord.y * 977 + tj, 22, 0.25, tstep - 0.25)
 		var bh: float = field.h(bx, bz)
 		var td: float = gen.tree_density_at(bx, bz, bh)
 		if td <= 0.01:
@@ -336,35 +361,50 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			continue
 		if field.slope(bx, bz) > 0.55:
 			continue
-		var th: float = bh
-		var yaw: float = WorldGen.hash_range(int(bx), int(bz), 24, 0.0, TAU)
-		var sc: float = WorldGen.hash_range(int(bx), int(bz), 25, 0.78, 1.5)
+		var yaw2: float = WorldGen.hash_range(int(bx), int(bz), 24, 0.0, TAU)
+		var sc: float = WorldGen.hash_range(int(bx), int(bz), 25, 0.72, 1.55)
 		var wind: float = WorldGen.hash_f(int(bx), int(bz), 26)
 		var m: float = gen.moisture(bx, bz)
 		var rl: float = gen.redline_factor(bx, bz)
-		var lp := Vector3(bx - ox, th, bz - oz)
-		var vscale := Vector3(sc, sc * WorldGen.hash_range(int(bx), int(bz), 27, 0.85, 1.25), sc)
-		if rl > 0.45 and WorldGen.hash_f(int(bx), int(bz), 28) < rl:
-			dead.add_simple(lp, yaw, vscale, Color(0.35, 0.3, 0.28), Color(wind, 0, 0, 0))
-		elif m > 0.52:
-			broad.add_simple(lp, yaw, vscale,
-				Color(0.8 + m * 0.3, 1.0, 0.75, 1.0), Color(wind, 0, 0, 0))
-		else:
-			pine.add_simple(lp, yaw, vscale,
-				Color(0.85, 0.95 + m * 0.2, 0.8, 1.0), Color(wind, 0, 0, 0))
+		var lp := Vector3(bx - ox, bh, bz - oz)
+		var vscale := Vector3(sc, sc * WorldGen.hash_range(int(bx), int(bz), 27, 0.82, 1.3), sc)
+		# Per-instance hue drift so a forest is not one repeated green.
+		var hue: float = WorldGen.hash_range(int(bx), int(bz), 34, 0.82, 1.18)
+		var leaf_col := Color(hue * 0.95, hue, hue * 0.88, 1.0)
 
-		# Undergrowth clusters around trees in forest zones.
-		if td > 0.6 and richness > 0.3:
-			for u in 2:
-				var ux: float = bx + WorldGen.hash_range(int(bx), int(bz) + u, 29, -2.4, 2.4)
-				var uz: float = bz + WorldGen.hash_range(int(bx) + u, int(bz), 30, -2.4, 2.4)
-				bush.add_simple(
-					Vector3(ux - ox, field.h(ux, uz), uz - oz),
-					WorldGen.hash_range(int(ux), int(uz), 31, 0.0, TAU),
-					Vector3.ONE * WorldGen.hash_range(int(ux), int(uz), 32, 0.6, 1.3),
-					Color(0.8, 1.0, 0.75, 1.0),
-					Color(WorldGen.hash_f(int(ux), int(uz), 33), 0, 0, 0)
-				)
+		if rl > 0.45 and WorldGen.hash_f(int(bx), int(bz), 28) < rl:
+			dead.add_simple(lp, yaw2, vscale, Color(0.85, 0.8, 0.76), Color(wind, 0, 0, 0))
+		elif m > 0.62 and WorldGen.hash_f(int(bx), int(bz), 35) < 0.35:
+			birch.add_simple(lp, yaw2, vscale, leaf_col, Color(wind, 0, 0, 0))
+		elif m > 0.5:
+			broad.add_simple(lp, yaw2, vscale, leaf_col, Color(wind, 0, 0, 0))
+		else:
+			pine.add_simple(lp, yaw2, vscale,
+				leaf_col * Color(0.92, 1.0, 0.9), Color(wind, 0, 0, 0))
+
+		# Forest floor: undergrowth, deadfall and stumps around the trees.
+		if td > 0.5 and richness > 0.3:
+			for u in 3:
+				var ux: float = bx + WorldGen.hash_range(int(bx), int(bz) + u, 29, -2.6, 2.6)
+				var uz: float = bz + WorldGen.hash_range(int(bx) + u, int(bz), 30, -2.6, 2.6)
+				var up := Vector3(ux - ox, field.h(ux, uz), uz - oz)
+				var uyaw: float = WorldGen.hash_range(int(ux), int(uz), 31, 0.0, TAU)
+				var usc: float = WorldGen.hash_range(int(ux), int(uz), 32, 0.6, 1.4)
+				var ucustom := Color(WorldGen.hash_f(int(ux), int(uz), 33), 0, 0, 0)
+				if WorldGen.hash_f(int(ux), int(uz), 36) < 0.45:
+					fern.add_simple(up, uyaw, Vector3.ONE * usc,
+						Color(0.95, 1.0, 0.9), ucustom)
+				else:
+					bush.add_simple(up, uyaw, Vector3.ONE * usc, leaf_col, ucustom)
+			var deadfall: float = WorldGen.hash_f(int(bx), int(bz), 37)
+			if deadfall < 0.08:
+				logs.add_simple(lp, yaw2 + 1.1,
+					Vector3.ONE * WorldGen.hash_range(int(bx), int(bz), 38, 0.7, 1.3),
+					Color(0.9, 0.86, 0.8), Color(0.0, 0.0, 0.95, 0.0))
+			elif deadfall < 0.13:
+				stumps.add_simple(lp, yaw2,
+					Vector3.ONE * WorldGen.hash_range(int(bx), int(bz), 39, 0.8, 1.25),
+					Color(0.92, 0.88, 0.82), Color(0.0, 0.0, 0.9, 0.0))
 
 
 # -----------------------------------------------------------------------------
@@ -397,8 +437,8 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 				continue
 			if WorldGen.hash_f(int(cx), int(cz), 41) > chance:
 				continue
-			var w: float = WorldGen.hash_range(int(cx), int(cz), 42, 7.0, BLOCK_CELL - 2.0)
-			var dp: float = WorldGen.hash_range(int(cx), int(cz), 43, 7.0, BLOCK_CELL - 2.0)
+			var w: float = WorldGen.hash_range(int(cx), int(cz), 42, 6.0, BLOCK_CELL - 4.0)
+			var dp: float = WorldGen.hash_range(int(cx), int(cz), 43, 6.0, BLOCK_CELL - 4.0)
 			# Reject footprints that would sit on the carriageway.
 			if (gen.on_road(cx - w * 0.5, cz) or gen.on_road(cx + w * 0.5, cz)
 					or gen.on_road(cx, cz - dp * 0.5) or gen.on_road(cx, cz + dp * 0.5)):
@@ -408,7 +448,9 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			var rng_h: Vector2 = gen.building_height_range(zone, rl)
 			var floors: int = int(round(WorldGen.hash_range(
 				int(cx), int(cz), 44, rng_h.x, rng_h.y)))
-			floors = clampi(floors, 1, 26)
+			if zone >= GameConfig.Zone.CITY and WorldGen.hash_f(int(cx), int(cz), 54) > 0.93:
+				floors = int(float(floors) * 2.1)
+			floors = clampi(floors, 1, 34)
 			if module_count + floors + 1 > MAX_MODULES_PER_CHUNK:
 				continue
 
@@ -556,11 +598,11 @@ static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			continue
 
 		if zone <= GameConfig.Zone.FOREST:
-			if roll < 0.10 * richness:
+			if roll < 0.055 * richness:
 				rocks.add_simple(lp, yaw,
 					Vector3.ONE * WorldGen.hash_range(int(wx), int(wz), 65, 0.5, 1.6),
 					Color(0.55, 0.54, 0.52), Color(0.0, 0.0, 0.85, 0.0))
-			elif roll < 0.115 * richness:
+			elif roll < 0.066 * richness:
 				boulders.add_simple(lp, yaw,
 					Vector3.ONE * WorldGen.hash_range(int(wx), int(wz), 66, 0.7, 1.5),
 					Color(0.5, 0.49, 0.48), Color(0.0, 0.0, 0.9, 0.0))

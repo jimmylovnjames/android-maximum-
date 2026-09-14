@@ -173,7 +173,10 @@ func _apply_profile(profile: Dictionary) -> void:
 	_shadow_positional = bool(profile.get("positional_shadows", true))
 
 	var preset: int = AdaptiveQualityManager.preset
-	var veg_step: float = [2.6, 2.0, 1.6, 1.25, 1.0][clampi(preset, 0, 4)]
+	# Grass spacing is a generation-time parameter: it decides how many
+	# instances exist at all, which is where the preset's real memory and
+	# geometry cost comes from.
+	var veg_step: float = [2.0, 1.3, 0.8, 0.6, 0.45][clampi(preset, 0, 4)]
 	var richness: float = clampf(float(profile.get("building_detail", 1.0)), 0.3, 2.0)
 	var fade: bool = preset >= AdaptiveQualityManager.Preset.ULTRA
 

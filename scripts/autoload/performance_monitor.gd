@@ -73,6 +73,9 @@ var counters: Dictionary = {
 	"chunks_cached": 0,
 	"chunk_cache_mb": 0.0,
 	"multimesh_instances": 0,
+	"grass_instances": 0,
+	"tree_instances": 0,
+	"prop_instances": 0,
 	"buildings": 0,
 	"stream_queue": 0,
 }
