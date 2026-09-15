@@ -182,7 +182,7 @@ func _apply_profile(profile: Dictionary) -> void:
 	# Grass spacing is a generation-time parameter: it decides how many
 	# instances exist at all, which is where the preset's real memory and
 	# geometry cost comes from.
-	var veg_step: float = [2.0, 1.3, 0.8, 0.6, 0.45][clampi(preset, 0, 4)]
+	var veg_step: float = [1.3, 0.8, 0.5, 0.38, 0.28][clampi(preset, 0, 4)]
 	var richness: float = clampf(float(profile.get("building_detail", 1.0)), 0.3, 2.0)
 	var fade: bool = preset >= AdaptiveQualityManager.Preset.ULTRA
 

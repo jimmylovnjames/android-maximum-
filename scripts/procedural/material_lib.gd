@@ -135,7 +135,7 @@ func rebuild(preset: int) -> void:
 	terrain.set_shader_parameter("detail_normal", ground_n)
 	terrain.set_shader_parameter("foam_noise", detail)
 	terrain.set_shader_parameter("water_level", GameConfig.WATER_LEVEL)
-	terrain.set_shader_parameter("normal_strength", 0.5)
+	terrain.set_shader_parameter("normal_strength", 0.38)
 
 	# --- Vegetation ----------------------------------------------------------
 	grass = _shader_mat(SH_VEGETATION, grass)

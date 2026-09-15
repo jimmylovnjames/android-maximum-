@@ -211,12 +211,16 @@ func _build_ground_cover() -> void:
 	# Three grass clusters of different height and hue. Scattering a mix
 	# instead of one repeated card is most of what stops ground cover reading
 	# as a tiled pattern.
+	# Card sizes are deliberately small. At 0.7-0.9 m across, a clump filled
+	# most of a square metre on its own and ground cover read as a field of
+	# lettuce; the density now comes from the number of instances instead,
+	# which is also the load the stress test wants.
 	var variants: Array[Dictionary] = [
-		{"clumps": 4, "w": 0.72, "h": 0.78,
+		{"clumps": 4, "w": 0.40, "h": 0.46,
 			"bottom": Color(0.15, 0.22, 0.08), "top": Color(0.52, 0.68, 0.26)},
-		{"clumps": 3, "w": 0.88, "h": 1.15,
+		{"clumps": 3, "w": 0.46, "h": 0.64,
 			"bottom": Color(0.13, 0.20, 0.07), "top": Color(0.44, 0.60, 0.21)},
-		{"clumps": 5, "w": 0.6, "h": 0.55,
+		{"clumps": 5, "w": 0.34, "h": 0.34,
 			"bottom": Color(0.18, 0.25, 0.10), "top": Color(0.60, 0.72, 0.32)},
 	]
 	for v in variants.size():
@@ -226,7 +230,7 @@ func _build_ground_cover() -> void:
 			var clumps: int = int(cfg["clumps"]) if lod == 0 else 1
 			for i in clumps:
 				var ang: float = float(i) * 1.77 + float(v)
-				var off := Vector3(cos(ang) * 0.2, 0.0, sin(ang) * 0.2)
+				var off := Vector3(cos(ang) * 0.12, 0.0, sin(ang) * 0.12)
 				b.add_cross_card(off, float(cfg["w"]),
 					float(cfg["h"]) * (1.0 - float(i) * 0.07),
 					cfg["bottom"], cfg["top"], ang)

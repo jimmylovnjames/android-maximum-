@@ -72,11 +72,14 @@ func setup(mat: MaterialLib) -> void:
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	environment.ambient_light_sky_contribution = 0.85
-	environment.ambient_light_color = Color(0.55, 0.62, 0.78)
-	environment.ambient_light_energy = 0.5
+	environment.ambient_light_color = Color(0.58, 0.60, 0.66)
+	environment.ambient_light_energy = 0.58
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
-	environment.tonemap_white = 3.2
+	# 3.2 left almost nothing for the highlight shoulder to do, so full
+	# daylight pushed every albedo towards white and the world looked
+	# bleached. 2.6 plus a daytime exposure pull gives the midtones back.
+	environment.tonemap_white = 2.6
 	environment.fog_enabled = true
 	environment.fog_mode = Environment.FOG_MODE_DEPTH
 	environment.fog_light_color = Color(0.62, 0.68, 0.76)
@@ -216,8 +219,8 @@ func _update(_force: bool) -> void:
 		# energy instead leaves the background alone, which is why the night
 		# figures here look large.
 		var night_floor: float = lerpf(0.52, 1.05, _urban)
-		environment.ambient_light_energy = lerpf(0.62, night_floor, night_factor)
-		environment.ambient_light_color = Color(0.55, 0.62, 0.78).lerp(
+		environment.ambient_light_energy = lerpf(0.58, night_floor, night_factor)
+		environment.ambient_light_color = Color(0.58, 0.60, 0.66).lerp(
 			Color(0.42, 0.48, 0.66), night_factor).lerp(
 			Color(0.95, 0.72, 0.46), _urban * night_factor)
 		# Ground mist belongs in the valleys and between the trees. Left at
@@ -228,6 +231,8 @@ func _update(_force: bool) -> void:
 			* lerpf(1.0, 2.1, night_factor) * lerpf(1.0, 0.16, _urban)
 		environment.fog_height = lerpf(7.0, 2.5, _storm_blend)
 		environment.fog_depth_begin = lerpf(60.0, 170.0, _urban)
+		# Night needs the sensitivity; daylight does not.
+		environment.tonemap_exposure = lerpf(0.80, 1.0, night_factor)
 		environment.adjustment_saturation = lerpf(1.12, 0.95, night_factor)
 		environment.adjustment_contrast = lerpf(1.14, 1.08, night_factor)
 		environment.glow_intensity = lerpf(0.38, 0.46, night_factor) if _glow else 0.0

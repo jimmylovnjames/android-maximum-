@@ -295,7 +295,7 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
 	# --- Ground cover -------------------------------------------------------
 	# Three grass batches plus flowers. Mixing variants per instance is what
 	# stops a field reading as one card stamped in a grid.
-	var gstep: float = clampf(d.veg_step, 0.6, 4.0)
+	var gstep: float = clampf(d.veg_step, 0.25, 4.0)
 	var gw: int = maxi(2, int(GameConfig.CHUNK_SIZE / gstep))
 	var gtotal: int = gw * gw
 	var grass_batches: Array[InstanceBatch] = []

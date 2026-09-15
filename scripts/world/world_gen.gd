@@ -220,18 +220,18 @@ func terrain_color_u(x: float, z: float, h: float, u: float) -> Color:
 	var m: float = moisture(x, z)
 	var rl: float = redline_factor(x, z)
 
-	var dry := Color(0.33, 0.29, 0.15)
-	var lush := Color(0.09, 0.23, 0.08)
-	var alpine := Color(0.28, 0.29, 0.27)
+	var dry := Color(0.215, 0.185, 0.095)
+	var lush := Color(0.062, 0.145, 0.055)
+	var alpine := Color(0.20, 0.21, 0.195)
 	var c: Color = dry.lerp(lush, smoothstep(0.15, 0.85, m))
 	# Metre-scale patchiness: bare earth showing through the sward.
 	var patch: float = n_bump.get_noise_2d(x * 0.5, z * 0.5) * 0.5 + 0.5
-	c = c.lerp(Color(0.26, 0.20, 0.13), clampf((patch - 0.62) * 2.2, 0.0, 1.0) * 0.5)
+	c = c.lerp(Color(0.175, 0.135, 0.085), clampf((patch - 0.62) * 2.2, 0.0, 1.0) * 0.5)
 
 	if h > 30.0:
 		c = c.lerp(alpine, clampf((h - 30.0) / 28.0, 0.0, 1.0))
 	if h < GameConfig.WATER_LEVEL + 2.0:
-		c = c.lerp(Color(0.36, 0.32, 0.22), 0.6)
+		c = c.lerp(Color(0.25, 0.22, 0.155), 0.6)
 
 	# Urban ground: concrete and asphalt.
 	var urban := Color(0.17, 0.17, 0.185)
@@ -302,7 +302,7 @@ func grass_density_at(x: float, z: float, h: float, s: float) -> float:
 		return 0.0
 	var m: float = moisture(x, z)
 	var open: float = pow(1.0 - clampf(u, 0.0, 1.0), 2.4)
-	return clampf((0.35 + m * 0.8) * open * (1.0 - s * 1.4), 0.0, 1.4)
+	return clampf((0.52 + m * 0.85) * open * (1.0 - s * 1.4), 0.0, 1.4)
 
 
 ## Probability that a given block cell holds a building.
