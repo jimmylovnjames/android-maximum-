@@ -47,6 +47,7 @@ var _mat_lib: MaterialLib = null
 var _last_focus_coord: Vector2i = Vector2i(999999, 999999)
 var _gen_veg_step: float = -1.0
 var _census_accum: float = 0.0
+var _census_active_count: int = -1
 var _stats_gen_ms: float = 0.0
 var _generated_total: int = 0
 var _enabled: bool = true
@@ -211,10 +212,15 @@ func _publish_counters(delta: float) -> void:
 	PerformanceMonitor.set_counter("active_world_mb", active_megabytes())
 	PerformanceMonitor.set_counter("stream_radius", effective_radius())
 
+	# Timer for the steady state, but always re-census immediately when the
+	# active set changes: otherwise the geometry counters can read stale (or
+	# zero, just after startup) for up to CENSUS_INTERVAL, which anything
+	# sampling them straight after a load would see as "nothing is drawn".
 	_census_accum += delta
-	if _census_accum < CENSUS_INTERVAL:
+	if _census_accum < CENSUS_INTERVAL and active.size() == _census_active_count:
 		return
 	_census_accum = 0.0
+	_census_active_count = active.size()
 	var inst: int = 0
 	var by_category: Dictionary = {}
 	for c: Vector2i in active.keys():
@@ -436,11 +442,21 @@ func _clear_cache() -> void:
 
 
 ## Drops everything and re-streams from scratch (benchmark reset / teleport).
+## Drops the live set, keeping the generated data in the retention cache.
+##
+## This used to free every chunk outright, bypassing _unload() and therefore
+## _cache_store(). Every teleport threw away the entire generated world: the
+## benchmark teleports between stages, so it reported chunks_cached = 0 for a
+## whole run including the stage whose entire purpose is to fill that cache,
+## and each stage then paid to regenerate chunks it had already built.
 func reset() -> void:
 	for c: Vector2i in active.keys():
 		var ch: WorldChunk = active[c]
+		var d: ChunkData = ch.data
 		ch.release()
 		ch.queue_free()
+		if d != null:
+			_cache_store(c, d)
 	active.clear()
 	_active_bytes = 0
 	_realizing.clear()

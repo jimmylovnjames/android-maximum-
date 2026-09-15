@@ -177,6 +177,22 @@ func _on_safety_throttle(reason: String) -> void:
 
 ## Resolves base table + quality multipliers + zone intensity into the single
 ## dictionary the world reads, clamped to the hard caps.
+## Benchmark-only per-subsystem multipliers, applied on top of the level table.
+## A stage that wants to load the AI alone sets {"npc": 4.0, "veg": 0.15,
+## "physics": 0.1}; everything else stays where the level put it. Empty during
+## normal play, so nothing here changes the shipped balance.
+var bench_overrides: Dictionary = {}
+
+
+func set_bench_overrides(o: Dictionary) -> void:
+	bench_overrides = o.duplicate()
+	_recompute()
+
+
+func _ov(key: String) -> float:
+	return float(bench_overrides.get(key, 1.0))
+
+
 func _recompute() -> void:
 	var base: Dictionary = TABLE[clampi(level, 0, TABLE.size() - 1)]
 	var q: Dictionary = AdaptiveQualityManager.effective()
@@ -187,19 +203,19 @@ func _recompute() -> void:
 	var zi: float = 1.0 + zone_intensity * 0.85
 
 	var e: Dictionary = {}
-	e["npc_count"] = _capi(base["npc_count"] * q["npc_mult"] * zi, GameConfig.MAX_NPCS)
-	e["enemy_count"] = _capi(base["enemy_count"] * q["npc_mult"] * zi, GameConfig.MAX_NPCS / 3)
+	e["npc_count"] = _capi(base["npc_count"] * q["npc_mult"] * zi * _ov("npc"), GameConfig.MAX_NPCS)
+	e["enemy_count"] = _capi(base["enemy_count"] * q["npc_mult"] * zi * _ov("npc"), GameConfig.MAX_NPCS / 3)
 	e["vehicle_count"] = _capi(
-		base["vehicle_count"] * q["traffic_mult"] * zi, GameConfig.MAX_VEHICLES
+		base["vehicle_count"] * q["traffic_mult"] * zi * _ov("traffic"), GameConfig.MAX_VEHICLES
 	)
 	e["rigid_bodies"] = _capi(
-		base["rigid_bodies"] * q["physics_mult"] * zi, GameConfig.MAX_RIGID_BODIES
+		base["rigid_bodies"] * q["physics_mult"] * zi * _ov("physics"), GameConfig.MAX_RIGID_BODIES
 	)
-	e["debris_budget"] = _capi(base["debris_budget"] * q["physics_mult"], GameConfig.MAX_DEBRIS)
-	e["destructible_stacks"] = _capi(base["destructible_stacks"] * q["physics_mult"] * zi, 64)
-	e["veg_density"] = clampf(float(base["veg_density"]) * float(q["veg_mult"]), 0.0, 6.0)
+	e["debris_budget"] = _capi(base["debris_budget"] * q["physics_mult"] * _ov("physics"), GameConfig.MAX_DEBRIS)
+	e["destructible_stacks"] = _capi(base["destructible_stacks"] * q["physics_mult"] * zi * _ov("physics"), 64)
+	e["veg_density"] = clampf(float(base["veg_density"]) * float(q["veg_mult"]) * _ov("veg"), 0.0, 6.0)
 	e["grass_multiplier"] = clampf(
-		float(base["grass_multiplier"]) * float(q["veg_mult"]), 0.0, 8.0
+		float(base["grass_multiplier"]) * float(q["veg_mult"]) * _ov("veg"), 0.0, 8.0
 	)
 	e["particle_budget"] = _capi(base["particle_budget"] * q["particle_mult"] * zi, 90000)
 	e["particle_systems"] = _capi(
@@ -214,14 +230,15 @@ func _recompute() -> void:
 	e["positional_shadows"] = bool(q.get("positional_shadows", true))
 	e["shadow_splits"] = int(q.get("shadow_splits", 2))
 	e["stream_radius"] = clampi(
-		int(base["stream_radius"]) + int(q.get("stream_bonus", 0)),
+		int(base["stream_radius"]) + int(q.get("stream_bonus", 0))
+			+ int(bench_overrides.get("stream_bonus", 0)),
 		2, GameConfig.MAX_STREAM_RADIUS
 	)
 	e["lod_bias"] = clampf(float(base["lod_bias"]) * float(q["lod_bias"]), 0.2, 6.0)
 	e["view_distance"] = clampf(
-		float(base["view_distance"]) * float(q["view_mult"]), 120.0, 4000.0
+		float(base["view_distance"]) * float(q["view_mult"]) * _ov("view"), 120.0, 4000.0
 	)
-	var cache_target: float = minf(float(base["cache_mb"]), float(q.get("cache_mb", 256)))
+	var cache_target: float = minf(float(base["cache_mb"]), float(q.get("cache_mb", 256))) * _ov("cache")
 	if bool(GameConfig.settings.get("high_memory_mode", false)):
 		cache_target *= 2.5
 	# Whatever the table asks for, never exceed what this device should hold.
@@ -231,7 +248,7 @@ func _recompute() -> void:
 	e["weather_complexity"] = int(base["weather_complexity"])
 	e["full_npc_ratio"] = clampf(float(base["full_npc_ratio"]), 0.05, 1.0)
 	e["building_detail"] = clampf(
-		float(base["building_detail"]) * float(q["lod_bias"]), 0.2, 4.0
+		float(base["building_detail"]) * float(q["lod_bias"]) * _ov("geometry"), 0.2, 4.0
 	)
 	e["render_scale"] = float(q["render_scale"])
 	e["glow"] = bool(q.get("glow", true))

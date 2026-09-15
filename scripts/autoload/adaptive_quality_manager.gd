@@ -138,13 +138,41 @@ func detect_reason() -> String:
 ## phone and it gets a 4 GB one killed. Android never hands a process the whole
 ## machine, so this takes a conservative slice of physical RAM and the preset's
 ## own figure is then clamped to it.
+## Headroom the device keeps whatever the benchmark asks for, in MB.
+const MEMORY_SAFETY_HEADROOM_MB: float = 1536.0
+## Share of the remaining free memory the cache may plan to occupy.
+const MEMORY_SAFETY_SHARE: float = 0.55
+
+## Benchmark-only request to hold more world data than the normal share. It is
+## a REQUEST: the availability clamp below still applies, so the RAM stage can
+## climb towards whatever the device will actually give and no further. An
+## Android process is not entitled to all of a 24 GB device's memory and this
+## never assumes it is.
+var bench_cache_ceiling_mb: int = 0
+
+
+func set_bench_cache_ceiling(mb: int) -> void:
+	bench_cache_ceiling_mb = maxi(0, mb)
+
+
 func device_cache_budget_mb() -> int:
 	var mi: Dictionary = OS.get_memory_info()
 	var phys_mb: float = float(mi.get("physical", -1)) / 1048576.0
+	var avail_mb: float = float(mi.get("available", -1)) / 1048576.0
 	if phys_mb <= 0.0:
 		return 256                      # platform will not say; stay modest
 	var share: float = 0.20 if OS.has_feature("mobile") else 0.28
-	return clampi(int(phys_mb * share), 96, GameConfig.MAX_CACHE_MB)
+	var budget: int = int(phys_mb * share)
+	if bench_cache_ceiling_mb > 0:
+		budget = maxi(budget, bench_cache_ceiling_mb)
+	# Hard stop, measured rather than assumed: never plan to hold more than a
+	# share of what the OS reports free right now, after leaving headroom. If
+	# the platform will not report availability we do not get to guess, so the
+	# normal share stands.
+	if avail_mb > 0.0:
+		var usable: float = maxf(0.0, avail_mb - MEMORY_SAFETY_HEADROOM_MB)
+		budget = mini(budget, int(usable * MEMORY_SAFETY_SHARE))
+	return clampi(budget, 96, GameConfig.MAX_CACHE_MB)
 
 
 func cache_budget_note() -> String:

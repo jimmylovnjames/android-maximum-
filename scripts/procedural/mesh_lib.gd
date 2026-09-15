@@ -80,14 +80,17 @@ func _build_trees() -> void:
 		var mesh: ArrayMesh = trunk.commit(null, _mat.bark)
 
 		var can := MeshBuilder.new()
-		var tiers: int = [7, 4, 2][lod]
+		var tiers: int = [9, 5, 2][lod]
 		for i in tiers:
 			var f: float = float(i) / float(maxi(tiers - 1, 1))
-			var y2: float = 2.1 + f * 6.2
-			var r: float = 2.85 * (1.0 - f * 0.82) + 0.25
-			var hgt: float = 2.3 * (1.0 - f * 0.4)
-			var tint: Color = Color(0.13, 0.30, 0.15).lerp(Color(0.26, 0.46, 0.22), f)
-			can.add_cone(Vector3(0.0, y2, 0.0), hgt, r, seg + 3, tint, true, 0.5)
+			var y2: float = 1.9 + f * 6.6
+			# Slight non-linearity so the tiers crowd towards the crown the way
+			# a real conifer's do, instead of stacking at even spacing.
+			var r: float = 3.05 * pow(1.0 - f, 0.78) + 0.22
+			var hgt: float = 2.5 * (1.0 - f * 0.35)
+			var tint: Color = Color(0.11, 0.27, 0.13).lerp(Color(0.30, 0.50, 0.24), f)
+			can.add_bough_tier(Vector3(0.0, y2, 0.0), hgt, r, seg + 4, tint,
+				i * 7 + lod, 0.34, 0.36)
 		can.commit(mesh, _mat.canopy)
 		meshes["pine_l%d" % lod] = mesh
 

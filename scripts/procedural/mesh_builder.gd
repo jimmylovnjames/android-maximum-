@@ -180,6 +180,39 @@ func add_cylinder_xform(xform: Transform3D, height: float, r_bottom: float,
 		normals[i] = (nrm_basis * normals[i]).normalized()
 
 
+## Conifer bough tier: a cone whose rim is pushed in and out per segment and
+## whose tips droop. A smooth cone reads as a plastic Christmas tree at any
+## distance; the ragged rim is what makes a conifer silhouette. Costs the same
+## number of triangles as the cone it replaces, so a forest of these is no more
+## expensive to draw -- the variety is in the vertex positions, not in extra
+## instances.
+func add_bough_tier(base: Vector3, height: float, radius: float, segments: int,
+		col: Color, seed_value: int, droop: float = 0.30,
+		ragged: float = 0.32) -> void:
+	segments = maxi(5, segments)
+	var apex: int = add_vertex(base + Vector3(0.0, height, 0.0), Vector3.UP,
+		Vector2(0.5, 0.0), col)
+	var rim: PackedInt32Array = PackedInt32Array()
+	for i in segments + 1:
+		var idx: int = i % segments
+		var a: float = TAU * float(idx) / float(segments)
+		# Deterministic per-segment jitter: same tree mesh every run, but no
+		# two segments of the rim at the same radius.
+		var h1: float = fmod(sin(float(idx) * 12.9898 + float(seed_value) * 78.233)
+			* 43758.5453, 1.0)
+		h1 = absf(h1)
+		var r: float = radius * (1.0 - ragged * h1)
+		var dy: float = -droop * radius * (0.45 + 0.55 * h1)
+		var p: Vector3 = base + Vector3(cos(a) * r, dy, sin(a) * r)
+		# Underside darkening baked into the vertex stream: the mobile renderer
+		# has no ambient occlusion to do it for us.
+		var shade: Color = col * (0.55 + 0.25 * h1)
+		var n: Vector3 = Vector3(cos(a) * 0.55, 0.8, sin(a) * 0.55).normalized()
+		rim.push_back(add_vertex(p, n, Vector2(float(idx) / float(segments), 1.0), shade))
+	for i in segments:
+		add_triangle(apex, rim[i + 1], rim[i])
+
+
 ## Cone along +Y (used for conifer canopies and spikes).
 func add_cone(base: Vector3, height: float, radius: float, segments: int,
 		col: Color, cap: bool = true, bottom_shade: float = 0.85) -> void:

@@ -36,7 +36,10 @@ const MAX_STREAM_RADIUS: int = 12
 ## like the device's full RAM, but a native app on a 12 GB+ phone can hold
 ## several gigabytes of real geometry; the auto-detected budget below is what
 ## actually applies on any given device.
-const MAX_CACHE_MB: int = 6144
+## Ceiling on retained world data. The real limit is whatever
+## AdaptiveQualityManager.device_cache_budget_mb() measures as safely
+## available; this only stops a misconfigured table asking for the moon.
+const MAX_CACHE_MB: int = 10240
 const MAX_PROJECTILES: int = 256
 const MAX_EXPLOSION_BODIES: int = 160
 

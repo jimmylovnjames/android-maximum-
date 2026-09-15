@@ -269,6 +269,8 @@ func telemetry() -> Dictionary:
 		"chunks_loaded": counters.get("chunks_loaded", 0),
 		"chunks_cached": counters.get("chunks_cached", 0),
 		"chunk_cache_mb": counters.get("chunk_cache_mb", 0.0),
+		"cache_budget_mb": StressDirector.get_param("cache_mb", 0),
+		"device_cache_budget_mb": AdaptiveQualityManager.device_cache_budget_mb(),
 		"multimesh_instances": counters.get("multimesh_instances", 0),
 		"subsystem_ms": _subsystem_ms_dict(),
 		"subsystem_total_ms": subsystem_total_ms(),

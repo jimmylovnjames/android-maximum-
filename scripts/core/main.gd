@@ -99,6 +99,7 @@ func _ready() -> void:
 	EventBus.safety_throttle.connect(_on_safety)
 	if _safety_off:
 		PerformanceMonitor.watchdog_enabled = false
+		BenchmarkManager.auto_advance_enabled = false
 		push_warning("REDLINE: low-FPS safety watchdog disabled by --safety-off")
 	EventBus.benchmark_finished.connect(_on_benchmark_finished)
 	EventBus.benchmark_aborted.connect(_on_benchmark_aborted)

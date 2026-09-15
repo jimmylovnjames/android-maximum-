@@ -403,8 +403,12 @@ func bench_prepare(seed_value: int) -> void:
 	teleport_player(Vector3(0.0, 0.0, 0.0))
 
 
-func bench_teleport(radius: float) -> void:
-	var ang: float = 0.6
+## `angle` lets a stage walk around the world rather than up and down one ray.
+## The RAM stage depends on it: retained memory comes from chunks the player
+## has actually visited, so hopping along a single bearing just re-treads
+## ground that is already cached and the figure plateaus.
+func bench_teleport(radius: float, angle: float = 0.6) -> void:
+	var ang: float = angle
 	var p := Vector3(cos(ang) * radius, 0.0, sin(ang) * radius)
 	# Land on the carriageway once there is one. City blocks are close to
 	# contiguous, so an arbitrary point at a given radius usually lands inside
