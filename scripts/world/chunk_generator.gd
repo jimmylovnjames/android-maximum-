@@ -810,6 +810,23 @@ static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			GameConfig.CHUNK_SIZE - 4.0)
 		var pz: float = oz + WorldGen.hash_range(d.coord.x + i, d.coord.y, 82, 4.0,
 			GameConfig.CHUNK_SIZE - 4.0)
+		# In a built-up area a free scatter puts most of them inside a building
+		# shell, because that is what most of the area is. Put them on the
+		# footway instead, which is where a pedestrian would be and where the
+		# player will actually see them.
+		if u > 0.25:
+			var nrp: Vector3 = gen.nearest_road_point(px, pz)
+			var side: float = 1.0 if WorldGen.hash_f(
+				d.coord.x + i * 5, d.coord.y + i, 91) < 0.5 else -1.0
+			var walk: float = side * WorldGen.hash_range(
+				d.coord.x + i, d.coord.y + i * 3, 92,
+				WorldGen.ROAD_HALF_WIDTH + 0.9, WorldGen.ROAD_HALF_WIDTH + 2.8)
+			if absf(nrp.x - px) < absf(nrp.z - pz):
+				px = nrp.x + walk           # road runs along Z
+			else:
+				pz = nrp.z + walk           # road runs along X
+		px = clampf(px, ox + 1.0, ox + GameConfig.CHUNK_SIZE - 1.0)
+		pz = clampf(pz, oz + 1.0, oz + GameConfig.CHUNK_SIZE - 1.0)
 		var h: float = field.h(px, pz)
 		if h < GameConfig.WATER_LEVEL + 0.5:
 			continue
@@ -841,6 +858,13 @@ static func _place_spawns(gen: WorldGen, d: ChunkData, opts: Dictionary,
 				continue
 			if rp.z < oz or rp.z > oz + GameConfig.CHUNK_SIZE:
 				continue
+			# Sit in a lane rather than straddling the centreline.
+			var lane: float = (1.0 if WorldGen.hash_f(
+				d.coord.x + i * 3, d.coord.y + i, 93) < 0.5 else -1.0) * 2.8
+			if absf(rp.x - vx) < absf(rp.z - vz):
+				rp.x += lane                # road runs along Z
+			else:
+				rp.z += lane                # road runs along X
 			d.vehicle_spawns.push_back(Vector3(rp.x, field.h(rp.x, rp.z), rp.z))
 
 	# Scavenge.
