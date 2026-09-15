@@ -12,6 +12,19 @@ const MAX_MODULES_PER_CHUNK: int = 900
 const PERM_PRIME: int = 104729
 ## Sign palette. Deliberately narrow and saturated so a night skyline reads as
 ## a city rather than a colour-noise field.
+## Facade families, chosen per district. Deliberately desaturated: these are
+## multiplied by the wall texture and then lit, so anything vivid here reads as
+## a toy.
+const FACADE_PALETTE: PackedColorArray = [
+	Color(0.52, 0.51, 0.50),   # concrete
+	Color(0.58, 0.53, 0.44),   # sandstone
+	Color(0.34, 0.38, 0.45),   # blue-grey curtain wall
+	Color(0.30, 0.29, 0.30),   # dark steel
+	Color(0.47, 0.31, 0.26),   # brick
+	Color(0.40, 0.45, 0.42),   # green-grey glass
+	Color(0.62, 0.59, 0.54),   # pale render
+]
+
 const NEON_COLORS: Array[Color] = [
 	Color(1.00, 0.24, 0.30), Color(0.25, 0.85, 1.00), Color(1.00, 0.62, 0.15),
 	Color(0.60, 0.30, 1.00), Color(0.30, 1.00, 0.55), Color(1.00, 0.85, 0.30),
@@ -474,9 +487,19 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 
 			var base_y: float = field.h(cx, cz) - 0.4
 			var seed_f: float = WorldGen.hash_f(int(cx), int(cz), 45)
-			var grey: float = WorldGen.hash_range(int(cx), int(cz), 46, 0.30, 0.62)
-			var warm: float = WorldGen.hash_range(int(cx), int(cz), 47, 0.9, 1.12)
-			var col := Color(grey * warm, grey, grey * (2.0 - warm), 1.0)
+			# Facade palette. A single grey ramp made every district the same
+			# beige; picking a family per district and varying inside it gives
+			# the skyline blocks of character without adding a draw call.
+			var fam: int = WorldGen.hash_i(
+				int(floor(cx / WorldGen.DISTRICT_SIZE)),
+				int(floor(cz / WorldGen.DISTRICT_SIZE)), 67) % FACADE_PALETTE.size()
+			var fam_col: Color = FACADE_PALETTE[fam]
+			var lum: float = WorldGen.hash_range(int(cx), int(cz), 46, 0.74, 1.3)
+			var drift: float = WorldGen.hash_range(int(cx), int(cz), 47, -0.05, 0.05)
+			var col := Color(
+				clampf(fam_col.r * lum + drift, 0.03, 0.95),
+				clampf(fam_col.g * lum, 0.03, 0.95),
+				clampf(fam_col.b * lum - drift, 0.03, 0.95), 1.0)
 			if rl > 0.3:
 				col = col.lerp(Color(0.22, 0.14, 0.13), rl * 0.7)
 

@@ -16,7 +16,10 @@ uniform float flicker_amount : hint_range(0.0, 1.0) = 0.06;
 
 global uniform float redline_night;
 
-varying float v_phase;
+// Per-instance constant, and it feeds a fract(sin(x) * 43758) amplifier, so
+// it has to be flat: interpolating it would give every pixel of a sign its
+// own flicker phase.
+varying flat float v_phase;
 
 void vertex() {
 	// Per-instance phase from the model matrix origin: no two signs on a

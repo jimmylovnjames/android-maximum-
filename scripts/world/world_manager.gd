@@ -274,7 +274,7 @@ func _refresh_lights(pp: Vector3) -> void:
 	if day_night == null:
 		return
 	var night: float = day_night.night_factor
-	var energy: float = clampf(night * 2.6, 0.0, 2.6)
+	var energy: float = clampf(night * 3.4, 0.0, 3.4)
 	if energy <= 0.02:
 		for l: OmniLight3D in _light_pool:
 			if l.visible:

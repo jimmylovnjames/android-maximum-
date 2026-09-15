@@ -17,9 +17,11 @@ global uniform float redline_night;
 global uniform float redline_wetness;
 
 varying vec3 v_world;
-varying float v_emis;
-varying float v_rough;
-varying float v_self_lit;
+// Per-instance constants: flat, so no interpolation error reaches the step()
+// comparisons below.
+varying flat float v_emis;
+varying flat float v_rough;
+varying flat float v_self_lit;
 
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;

@@ -36,6 +36,7 @@ const TERRAIN_LOD_RANGES: PackedFloat32Array = [96.0, 240.0, 520.0, 1400.0]
 ## batch-wide override would wipe out.
 const SELF_MATERIALED: PackedStringArray = [
 	"rock_l0", "rock_l1", "boulder", "outcrop0", "outcrop1", "sign", "hoarding",
+	"streetlight",
 ]
 
 var data: ChunkData = null

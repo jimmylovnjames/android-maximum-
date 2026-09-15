@@ -230,7 +230,7 @@ func _update(_force: bool) -> void:
 		environment.fog_depth_begin = lerpf(60.0, 170.0, _urban)
 		environment.adjustment_saturation = lerpf(1.12, 0.95, night_factor)
 		environment.adjustment_contrast = lerpf(1.14, 1.08, night_factor)
-		environment.glow_intensity = lerpf(0.38, 0.62, night_factor) if _glow else 0.0
+		environment.glow_intensity = lerpf(0.38, 0.46, night_factor) if _glow else 0.0
 
 	GameConfig.set_shader_global("redline_night", night_factor)
 	# Ambient cannot carry the urban night lift on its own without washing the

@@ -25,7 +25,7 @@ uniform float detail_strength = 0.36;
 uniform float normal_strength = 0.85;
 uniform float macro_variation = 0.42;
 
-uniform float sky_glow_energy = 0.30;
+uniform float sky_glow_energy = 0.13;
 uniform vec3 sky_glow_color : source_color = vec3(1.0, 0.68, 0.42);
 
 global uniform float redline_wetness;

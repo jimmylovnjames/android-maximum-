@@ -15,15 +15,16 @@ uniform float window_w = 2.7;
 uniform float window_h = 3.4;
 uniform float window_fill = 0.62;
 uniform vec4 window_day : source_color = vec4(0.11, 0.14, 0.17, 1.0);
-uniform vec4 window_lit : source_color = vec4(1.0, 0.82, 0.52, 1.0);
-uniform float emission_energy = 1.5;
+uniform vec4 window_lit : source_color = vec4(1.0, 0.86, 0.62, 1.0);
+uniform float emission_energy = 0.95;
 uniform float lit_fraction : hint_range(0.0, 1.0) = 0.34;
 uniform float wall_roughness = 0.82;
 
-uniform float sky_glow_energy = 0.42;
-uniform float sky_glow_height = 130.0;
+uniform float sky_glow_energy = 0.24;
+uniform float sky_glow_height = 70.0;
 uniform vec3 sky_glow_color : source_color = vec3(1.0, 0.70, 0.44);
 uniform float grime_height = 9.0;
+uniform float retail_height = 5.4;
 
 global uniform float redline_night;
 global uniform float redline_wetness;
@@ -112,8 +113,12 @@ void fragment() {
 		+ vec2(fract(v_seed) * 97.0, fract(v_seed * 1.7) * 37.0));
 	// Same treatment for which windows are lit: at distance the per-cell coin
 	// flip is sub-pixel noise, so it resolves to the mean.
-	float lit = mix(lit_fraction, step(1.0 - lit_fraction, r), resolve)
-		* clamp(redline_night, 0.0, 1.0);
+	float lit = mix(lit_fraction, step(1.0 - lit_fraction, r), resolve);
+	// Ground-floor retail stays lit whether or not the coin came up heads, and
+	// it is the part of a building a player on the pavement actually sees.
+	float shopfront = 1.0 - smoothstep(retail_height * 0.6, retail_height, v_world_y);
+	lit = max(lit, shopfront * 0.9);
+	lit *= clamp(redline_night, 0.0, 1.0);
 
 	// Horizontal spandrel band between floors so storeys read at distance even
 	// when the window grid itself is too small to resolve.
@@ -131,7 +136,7 @@ void fragment() {
 
 	ALBEDO = mix(base, glass, inw);
 
-	float glow = inw * lit * emission_energy * (0.55 + 0.45 * r);
+	float glow = inw * lit * emission_energy * (0.35 + 0.95 * r * r);
 	// Light pollution. A city's own sodium haze lights its walls from below,
 	// and it has to be emission rather than ambient: raising ambient_light_energy
 	// far enough to do this leaks the ambient colour into the sky background
