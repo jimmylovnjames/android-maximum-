@@ -111,7 +111,39 @@ Anything derived from `INSTANCE_CUSTOM`, `MODEL_MATRIX[3]`, or `NORMAL` that
 feeds a hash or a `step()` threshold must be `varying flat`. Already applied in
 `building.gdshader`, `prop_instanced.gdshader`, `neon.gdshader`.
 
-### 3.4 Ambient leaks into the sky background
+### 3.4 Shadow bias — under-biasing looks exactly like texture aliasing
+`shadow_bias` and `shadow_normal_bias` on the sun were set to 0.028 / 1.1,
+below Godot's own defaults of 0.1 / 2.0. On a large flat surface seen at a
+grazing angle — which is what a road is, most of the time — that produced
+shadow acne as radial streaks converging on the camera, over every ground
+surface in the game.
+
+It was mistaken for texture-filtering aliasing for a long time. The bisection
+that settled it: replace every texture term in `terrain.gdshader` with flat
+vertex colour and re-render. The streaks survived, so they were never a
+texture problem. Measured horizontal roughness over a patch of road: **3.42
+before, 0.43 after** raising the bias to 0.06 / 2.4.
+
+If you see fine regular structure on the ground, measure it before theorising:
+
+```python
+px = Image.open(shot).crop(box).convert('L').load()
+# mean absolute horizontal neighbour difference
+```
+
+### 3.5 Large world-space UVs lose mantissa bits
+A world X of ~1450 times a texture scale of 0.18 gives a UV around 260.
+float32 has so few bits left at that magnitude that the lookup jitters by a
+couple of texels per pixel, which renders as a fixed dither pattern.
+
+Terrain detail UVs are built from the **chunk-local** vertex position
+(0..64) instead, and `detail_scale` is 0.25 so the 4 m tiling period divides
+the 64 m chunk exactly and stays continuous across seams. Any new rate applied
+to `duv` must also be an exact divisor (0.25, 0.5) or it reintroduces a seam.
+
+The prop shader wraps the instance origin to 32 m for the same reason.
+
+### 3.6 Ambient leaks into the sky background
 With `background_mode = BG_SKY`, lowering `ambient_light_sky_contribution`
 paints `ambient_light_color` over the sky as a flat wash. Measured on one
 frame: the night sky went from RGB `4,0,0` at contribution 0.85 to `128,91,49`
@@ -121,13 +153,13 @@ at 0.06. Raising `ambient_light_energy` leaks far less but still leaks.
 `building.gdshader` and `terrain.gdshader`, driven by the global
 `redline_urban_night`, not an ambient lift.
 
-### 3.5 Mobile renderer limits
+### 3.7 Mobile renderer limits
 No screen/depth texture reads, no SDFGI/SSAO/SSR/SSIL, no volumetric fog. Post
 process is a transparent `CanvasLayer` quad (`postfx.gdshader`). The shoreline
 foam is computed from vertex height against the water plane because there is no
 depth buffer to intersect.
 
-### 3.6 Runtime gotchas already hit
+### 3.8 Runtime gotchas already hit
 - `global_shader_parameter_get_list()` is editor-only and logs a performance
   error at runtime. `GameConfig._global_float()` just calls `add` then `set`.
 - `ResourceLoader.load(..., CACHE_MODE_IGNORE)` recompiles executing scripts and
@@ -142,7 +174,7 @@ depth buffer to intersect.
 - `godot --check-only --script X.gd` runs without autoloads, so "identifier not
   found" for `GameConfig` etc. is expected noise there.
 
-### 3.7 Shader globals
+### 3.9 Shader globals
 Registered in `GameConfig`: `redline_night`, `redline_wind`, `redline_wetness`,
 `redline_urban_night`. Set each frame by `DayNightSystem` / `WeatherManager`.
 
@@ -207,31 +239,30 @@ godot --headless --path . --import     # always run after editing a shader
   blue curtain wall, dark steel, brick, green glass, pale render), pedestrians,
   props.
 - Forest: genuinely dense ground cover and trees at quality 2.
+- Streets: kerbs, footways with flag joints, bollards on the pavement,
+  centre-line dashes, pedestrians on the footway, traffic in a lane.
 
 **Known-imperfect, in rough priority order:**
 
-1. **Road surface has no identity.** Asphalt is tinted darker in
-   `terrain_color_u` but there are no kerbs, no lane markings visible at street
-   level, and no sidewalk geometry. `road_mark` instances exist but read as
-   nothing.
-2. **Ground detail texture tiles visibly** as a regular grid on paved surfaces
-   at 10-40 m (`detail_scale = 0.18` → 5.5 m tiling). Needs either a larger
-   macro break-up or a second rotated sample.
-3. **Streetlight pools are weak.** 49 `OmniLight3D`s are live at HEAVY but the
-   terrain light-pollution fill plus ambient flattens their contribution.
-4. **No traffic or pedestrians visible on the main carriageway** in captures
-   even though `vehicles: 57` / `npc_total: 272` are live — they are spawning
-   inside blocks rather than on the road grid.
-5. **`ROAD_SPACING` is 128 m with no secondary streets**, so a "dense city"
+1. **`ROAD_SPACING` is 128 m with no secondary streets**, so a "dense city"
    block is a 128 m solid mass of buildings with an inaccessible interior. The
-   player can end up inside a building shell. `TrafficManager` and
-   `nearest_road_point()` both assume this spacing, so adding secondary streets
-   is a real refactor.
-6. Tree trunks read as grey concrete pillars rather than bark.
-7. NPC bodies are very simple blocky figures.
-8. Low-lying terrain still reads slightly sandy where it sits near
+   player can still end up inside a building shell if they walk into one.
+   `TrafficManager` and `nearest_road_point()` both assume this spacing, so
+   adding secondary streets is a real refactor.
+2. **No crossings, traffic signals or road name signage** at intersections.
+   The kerb line is deliberately broken through an intersection but nothing
+   marks the junction.
+3. **Prop scatter ignores the footway**, so crates and barrels pile up on the
+   pavement. Reads as litter, which suits the setting, but it is not
+   deliberate.
+4. Tree trunks read as grey concrete pillars rather than bark.
+5. NPC bodies are very simple blocky figures.
+6. Low-lying terrain still reads slightly sandy where it sits near
    `WATER_LEVEL = -6.0`; the world function keeps a lot of ground within a few
    metres of the water plane.
+7. Anisotropic filtering is requested on the ground samplers but appears to be
+   a no-op under lavapipe, so its effect is **unverified**. It costs nothing to
+   keep and is correct for real hardware.
 
 ---
 
@@ -277,15 +308,34 @@ wires up `tools/debug.keystore`. No Gradle build.
 fails the export with *"Min SDK / Target SDK can only be overridden when Use
 Gradle Build is enabled"*.
 
-Verify the artifact, do not trust the build log:
+Build both, using the **exact** preset name from `export_presets.cfg`:
+
 ```bash
-apksigner verify --print-certs build/redline.apk
-aapt2 dump badging build/redline.apk | head
+godot --headless --path . --export-release \
+  "Android arm64 (OnePlus 12 / Snapdragon 8 Gen 3)" build/redline-release.apk
+godot --headless --path . --export-debug \
+  "Android arm64 (OnePlus 12 / Snapdragon 8 Gen 3)" build/redline.apk
 ```
 
-The APK has built and signed successfully. It has **not** been run on real
-hardware — every performance number in this repo comes from lavapipe software
-rendering and is not representative.
+**Benchmark the release build, not the debug build.** A debug export carries
+Godot's debugger and profiler, so a stress test run on it measures the
+debugger. The release preset reuses the debug keystore, so the APK sideloads
+but is not Play-distributable — which is correct for a benchmark build.
+
+Verify the artifact, do not trust the build log:
+```bash
+~/android-sdk/build-tools/34.0.0/apksigner verify --print-certs build/redline-release.apk
+~/android-sdk/build-tools/34.0.0/aapt2 dump badging build/redline-release.apk | \
+  grep -E "^package|^native-code|^launchable"
+```
+
+Last verified export: `com.redline.stresstest` 0.1.0, minSdk 24, compileSdk 35,
+`native-code: 'arm64-v8a'`, `screenOrientation=11` (sensorLandscape), no
+app-level permissions, ~26 MB release / ~28 MB debug.
+
+The APK builds and signs. It has **not** been run on real hardware — every
+performance number in this repo comes from lavapipe software rendering and is
+not representative.
 
 ---
 
@@ -293,18 +343,13 @@ rendering and is not representative.
 
 Roughly in order of visual payoff per unit of risk:
 
-1. **Street furniture and road surface.** Kerbs and a sidewalk strip as
-   geometry, visible lane markings, a distinct asphalt material response. This
-   is the single biggest remaining gap between "boxes on a plane" and "a city".
-2. **Spawn traffic and pedestrians on the road grid**, not inside blocks. The
-   spawn points already exist in `ChunkData.vehicle_spawns` / `npc_spawns`;
-   they need to be filtered through `on_road()` / `nearest_road_point()`.
-3. **Secondary street grid inside city blocks.** Highest payoff, highest risk —
+1. **Secondary street grid inside city blocks.** Highest payoff, highest risk —
    `TrafficManager` and `nearest_road_point()` both assume the 128 m spacing.
-4. Break up the paved ground tiling (item 5.2).
-5. Bark material for tree trunks; a second trunk mesh variant.
-6. Better NPC silhouettes.
-7. **Run it on the actual OnePlus 12** and replace every performance figure in
+2. **Intersections**: crossings, stop lines, signal heads on the kerb.
+3. Bark material and a second trunk mesh variant for trees.
+4. Better NPC silhouettes.
+5. Keep prop scatter off the footway.
+6. **Run it on the actual OnePlus 12** and replace every performance figure in
    the README with a measured one.
 
 ---
