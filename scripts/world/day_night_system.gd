@@ -79,7 +79,7 @@ func setup(mat: MaterialLib) -> void:
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	environment.ambient_light_sky_contribution = 0.85
 	environment.ambient_light_color = Color(0.58, 0.60, 0.66)
-	environment.ambient_light_energy = 0.58
+	environment.ambient_light_energy = 2.1
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
 	# 3.2 left almost nothing for the highlight shoulder to do, so full
@@ -233,7 +233,13 @@ func _update(_force: bool) -> void:
 		# energy instead leaves the background alone, which is why the night
 		# figures here look large.
 		var night_floor: float = lerpf(0.52, 1.05, _urban)
-		environment.ambient_light_energy = lerpf(0.58, night_floor, night_factor)
+		# Daylight figure is large for the same reason the night one is: only
+		# (1 - ambient_light_sky_contribution) of it reaches a surface directly,
+		# the rest comes from the sky radiance map, which integrates dim. At
+		# 0.58 a shadowed forest floor measured RGB 5,18,12 against 118,134,68
+		# in the sun -- a 7:1 shadow ratio, where real skylight fills shadows to
+		# nearer 3:1.
+		environment.ambient_light_energy = lerpf(2.1, night_floor, night_factor)
 		environment.ambient_light_color = Color(0.58, 0.60, 0.66).lerp(
 			Color(0.42, 0.48, 0.66), night_factor).lerp(
 			Color(0.95, 0.72, 0.46), _urban * night_factor)
@@ -246,7 +252,7 @@ func _update(_force: bool) -> void:
 		environment.fog_height = lerpf(7.0, 2.5, _storm_blend)
 		environment.fog_depth_begin = lerpf(60.0, 170.0, _urban)
 		# Night needs the sensitivity; daylight does not.
-		environment.tonemap_exposure = lerpf(0.80, 1.0, night_factor)
+		environment.tonemap_exposure = lerpf(0.95, 1.0, night_factor)
 		environment.adjustment_saturation = lerpf(1.12, 0.95, night_factor)
 		environment.adjustment_contrast = lerpf(1.14, 1.08, night_factor)
 		environment.glow_intensity = lerpf(0.38, 0.46, night_factor) if _glow else 0.0

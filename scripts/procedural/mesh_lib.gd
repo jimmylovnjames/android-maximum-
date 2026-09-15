@@ -252,13 +252,30 @@ func _build_ground_cover() -> void:
 			Color(0.20, 0.30, 0.12), Color(0.86, 0.82, 0.42), a)
 	meshes["flower"] = flower.commit(null, _mat.grass)
 
+	# Undergrowth. Two big low-subdivision blobs read as angular green plates
+	# from a metre away -- a subdivision-1 blob is barely more than an
+	# octahedron -- so this is a cluster of smaller, more rounded lobes at
+	# varied heights instead. Still one mesh in one MultiMesh batch, so the
+	# extra shape costs triangles, not draw calls or instances.
 	var bush := MeshBuilder.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
-	bush.add_blob(Vector3(0.0, 0.48, 0.0), Vector3(0.85, 0.62, 0.85), 1,
-		Color(0.20, 0.38, 0.17), rng, 0.32, 0.6)
-	bush.add_blob(Vector3(0.42, 0.36, -0.28), Vector3(0.5, 0.4, 0.5), 1,
-		Color(0.24, 0.42, 0.19), rng, 0.32, 0.6)
+	var lobes: Array[Dictionary] = [
+		{"c": Vector3(0.0, 0.42, 0.0), "r": Vector3(0.52, 0.44, 0.52), "t": 0.0},
+		{"c": Vector3(0.34, 0.30, -0.22), "r": Vector3(0.38, 0.32, 0.36), "t": 0.35},
+		{"c": Vector3(-0.28, 0.34, 0.26), "r": Vector3(0.34, 0.30, 0.38), "t": 0.7},
+		{"c": Vector3(0.10, 0.62, 0.16), "r": Vector3(0.30, 0.26, 0.30), "t": 1.0},
+	]
+	for lb: Dictionary in lobes:
+		bush.add_blob(lb["c"], lb["r"], 2,
+			Color(0.17, 0.34, 0.14).lerp(Color(0.28, 0.46, 0.20), float(lb["t"])),
+			rng, 0.38, 0.65)
+	# A few bare stems at the base so it sits on the ground rather than
+	# hovering as a detached mass.
+	for st in 3:
+		var sa: float = float(st) * 2.1 + 0.4
+		bush.add_cylinder(Vector3(cos(sa) * 0.09, 0.0, sin(sa) * 0.09), 0.34,
+			0.035, 0.022, 4, Color(0.26, 0.21, 0.15), false, false, 0.6)
 	meshes["bush"] = bush.commit(null, _mat.canopy)
 
 	var fern := MeshBuilder.new()

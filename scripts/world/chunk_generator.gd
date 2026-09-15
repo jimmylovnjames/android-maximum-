@@ -411,7 +411,7 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
 				var uz: float = bz + WorldGen.hash_range(int(bx) + u, int(bz), 30, -2.6, 2.6)
 				var up := Vector3(ux - ox, field.h(ux, uz), uz - oz)
 				var uyaw: float = WorldGen.hash_range(int(ux), int(uz), 31, 0.0, TAU)
-				var usc: float = WorldGen.hash_range(int(ux), int(uz), 32, 0.6, 1.4)
+				var usc: float = WorldGen.hash_range(int(ux), int(uz), 32, 0.55, 1.05)
 				var ucustom := Color(WorldGen.hash_f(int(ux), int(uz), 33), 0, 0, 0)
 				if WorldGen.hash_f(int(ux), int(uz), 36) < 0.45:
 					fern.add_simple(up, uyaw, Vector3.ONE * usc,
