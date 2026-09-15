@@ -168,6 +168,14 @@ func _apply_look(delta_deg: Vector2) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("player", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	if frozen:
 		velocity = Vector3.ZERO
 		_last_pos = global_position

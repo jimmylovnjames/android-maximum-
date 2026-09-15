@@ -542,6 +542,14 @@ func _reclaim_one() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("physics_mgr", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	for idx: int in _proj_active.duplicate():
 		_proj_life[idx] -= delta
 		if _proj_life[idx] <= 0.0 or _projectiles[idx].global_position.y < -120.0:

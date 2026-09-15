@@ -189,12 +189,20 @@ func apply_lod(lod_bias: float, view_distance: float, fade: bool) -> void:
 		end2 = minf(end2, view_distance)
 		mmi.visibility_range_begin = 0.0
 		mmi.visibility_range_end = end2
-		# Ground cover and distant trees always fade rather than pop: their cull
-		# edges are the ones the player is most likely to be looking at.
-		if batch.category == "grass" or batch.category == "tree":
+		# Distant trees fade rather than pop; their cull edge is the one the
+		# player is most likely to be looking at, and there are only a few
+		# thousand of them. Ground cover hard-culls: a dithered fade needs the
+		# material to carry alpha, and paying transparent-queue cost on a
+		# quarter of a million grass instances to smooth a 50 m cull edge that
+		# sits inside the fog is not a trade worth making.
+		if batch.category == "tree":
 			mmi.visibility_range_end_margin = end2 * 0.18
 			mmi.visibility_range_fade_mode = \
 				GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+		elif batch.category == "grass" or batch.category == "bush":
+			mmi.visibility_range_end_margin = 0.0
+			mmi.visibility_range_fade_mode = \
+				GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 		else:
 			mmi.visibility_range_fade_mode = (
 				fade_mode as GeometryInstance3D.VisibilityRangeFadeMode)
@@ -237,18 +245,24 @@ func visible_instances() -> int:
 	return n
 
 
-## Instances currently drawn, broken down by batch category. Reported to the
-## HUD so the geometry load is a number rather than a vibe, and so a category
-## that silently stops drawing is visible immediately.
-func accumulate_category_counts(out: Dictionary) -> void:
+## Total instances currently drawn, and the same figure broken down by batch
+## category, in ONE walk. This used to be two separate passes over every batch
+## node of every active chunk, run every frame purely to feed HUD counters: at
+## a streaming radius of 10 that is ~8,800 MultiMesh property fetches a frame
+## through the Object binding, and it was the largest single script cost in the
+## game. ChunkStreamer now also calls it on a timer rather than per frame.
+func accumulate_counts(out: Dictionary) -> int:
 	if not realized:
-		return
+		return 0
+	var total: int = 0
 	for key: String in _batch_nodes.keys():
-		var batch: InstanceBatch = data.batches[key]
 		var mm: MultiMesh = (_batch_nodes[key] as MultiMeshInstance3D).multimesh
 		var n: int = (mm.visible_instance_count if mm.visible_instance_count >= 0
 			else mm.instance_count)
-		out[batch.category] = int(out.get(batch.category, 0)) + n
+		total += n
+		var cat: String = (data.batches[key] as InstanceBatch).category
+		out[cat] = int(out.get(cat, 0)) + n
+	return total
 
 
 func visible_building_modules() -> int:

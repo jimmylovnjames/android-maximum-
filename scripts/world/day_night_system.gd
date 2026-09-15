@@ -179,6 +179,14 @@ func set_storm_blend(v: float) -> void:
 
 
 func _process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("daynight", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	advance(delta)
 	_update(false)
 

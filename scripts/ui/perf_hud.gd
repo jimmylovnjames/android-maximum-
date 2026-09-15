@@ -56,6 +56,14 @@ func toggle() -> void:
 
 
 func _process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("hud_perf", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	if mode == Mode.OFF:
 		return
 	_pulse += delta

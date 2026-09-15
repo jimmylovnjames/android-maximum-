@@ -1,5 +1,12 @@
 shader_type spatial;
-render_mode cull_disabled, depth_prepass_alpha, diffuse_lambert, specular_disabled;
+// OPAQUE, deliberately. Writing to ALPHA at all -- even ALPHA = 1.0 -- moves a
+// Godot material into the transparent queue: no early-Z, per-draw depth
+// sorting, and with depth_prepass_alpha the geometry is rasterised twice. This
+// shader draws every blade of grass and every leaf card in the world, a
+// quarter of a million instances in a forest, so that cost 265k instances two
+// full passes with hidden-surface removal switched off. The cutout comes from
+// discard instead, which keeps the material opaque.
+render_mode cull_disabled, depth_draw_opaque, diffuse_lambert, specular_disabled;
 
 // MultiMesh foliage. Per-instance wind phase comes in through INSTANCE_CUSTOM.x
 // so a whole forest sways out of sync from one draw call.
@@ -42,7 +49,9 @@ void fragment() {
 	c *= mix(0.72, 1.0, v_height);
 	c = mix(c, c * 0.6, clamp(redline_wetness, 0.0, 1.0) * 0.5);
 	ALBEDO = c;
-	ALPHA = 1.0;
+	// Cards are double-sided, so a back face has to flip its normal or half of
+	// every plant is lit from the wrong side.
+	NORMAL = FRONT_FACING ? NORMAL : -NORMAL;
 	ROUGHNESS = 0.85;
 	BACKLIGHT = vec3(translucency) * c;
 }

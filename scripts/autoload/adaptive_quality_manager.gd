@@ -162,7 +162,7 @@ func preset_name() -> String:
 
 func apply_preset(p: int, persist: bool = true) -> void:
 	preset = clampi(p, 0, PRESETS.size() - 1)
-	profile = PRESETS[preset].duplicate(true)
+	profile = _clamp_for_device(PRESETS[preset].duplicate(true))
 	adaptive_factor = 1.0
 	_apply_render_settings()
 	if persist:
@@ -170,6 +170,49 @@ func apply_preset(p: int, persist: bool = true) -> void:
 		GameConfig.save_settings()
 	profile_applied.emit(preset, effective())
 	EventBus.quality_preset_changed.emit(preset, preset_name())
+
+
+## Mobile panels are 400+ ppi. Supersampling one, or running 4x MSAA over it,
+## buys almost nothing a player can see and costs an enormous amount of
+## bandwidth. On a OnePlus 12 (Adreno 750, 1440x3168) the auto-detected ULTRA
+## preset meant 4x MSAA over a 4.5 MP target -- 18 M samples a frame before any
+## overdraw -- which is most of why the forest stage ran at 8-9 fps while
+## reporting only 740 MB and 303 draw calls. Neither is a RAM or draw-call
+## problem; both are fill.
+##
+## The benchmark's GPU/fill stage raises these again deliberately, through
+## push_gpu_load(), so the capability is still exercised -- it is just no
+## longer the silent default for simply walking around.
+func _clamp_for_device(p: Dictionary) -> Dictionary:
+	if not (OS.has_feature("mobile") or OS.get_name() == "Android"):
+		return p
+	p["render_scale"] = minf(float(p.get("render_scale", 1.0)), 1.0)
+	p["msaa"] = mini(int(p.get("msaa", 0)), 1)
+	p["dir_shadow_size"] = mini(int(p.get("dir_shadow_size", 2048)), 2048)
+	p["shadow_atlas"] = mini(int(p.get("shadow_atlas", 2048)), 2048)
+	p["shadow_splits"] = mini(int(p.get("shadow_splits", 2)), 2)
+	p["soft_shadow_quality"] = mini(int(p.get("soft_shadow_quality", 1)), 2)
+	return p
+
+
+## Benchmark hook: temporarily raise the pure-GPU knobs so a stage can stress
+## fill rate and shadow resolution on their own, without touching geometry,
+## AI or physics counts. Pass 0.0 to restore the device profile.
+func push_gpu_load(amount: float) -> void:
+	var a: float = clampf(amount, 0.0, 1.0)
+	if a <= 0.0:
+		profile = _clamp_for_device(PRESETS[preset].duplicate(true))
+	else:
+		var base: Dictionary = _clamp_for_device(PRESETS[preset].duplicate(true))
+		base["render_scale"] = lerpf(float(base["render_scale"]), 1.35, a)
+		base["msaa"] = 1 if a < 0.5 else 2
+		base["dir_shadow_size"] = 2048 if a < 0.5 else 4096
+		base["shadow_splits"] = 2 if a < 0.5 else 4
+		base["soft_shadow_quality"] = 2 if a < 0.5 else 4
+		base["shadow_distance"] = lerpf(float(base["shadow_distance"]), 320.0, a)
+		profile = base
+	_apply_render_settings()
+	profile_applied.emit(preset, effective())
 
 
 func cycle_preset(dir: int) -> void:

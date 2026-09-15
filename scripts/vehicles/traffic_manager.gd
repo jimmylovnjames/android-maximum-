@@ -242,6 +242,14 @@ func _yaw_of(i: int) -> float:
 
 
 func _physics_process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("traffic", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	if world_gen == null or player == null or not is_instance_valid(player):
 		return
 	var pp: Vector3 = player.global_position

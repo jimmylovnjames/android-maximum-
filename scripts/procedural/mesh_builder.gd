@@ -259,6 +259,42 @@ func add_cross_card(center: Vector3, width: float, height: float, col_bottom: Co
 		add_triangle(i0, i2, i3)
 
 
+## A single tapered grass blade: a narrow strip that narrows to a point and
+## leans over, built as real geometry so the material needs no alpha test.
+## Four segments is enough for the curve to read without the vertex count
+## getting silly -- these are instanced hundreds of thousands of times.
+func add_blade(base: Vector3, yaw: float, width: float, height: float,
+		lean: float, col_bottom: Color, col_top: Color,
+		segments: int = 4) -> void:
+	var dir := Vector3(cos(yaw), 0.0, sin(yaw))
+	var side := Vector3(-sin(yaw), 0.0, cos(yaw)) * width * 0.5
+	var n: Vector3 = dir.cross(Vector3.UP).normalized()
+	if n.length_squared() < 0.5:
+		n = Vector3.FORWARD
+	var prev_l: int = -1
+	var prev_r: int = -1
+	for si in segments + 1:
+		var t: float = float(si) / float(segments)
+		# Taper to a point, and bend further over towards the tip.
+		var w: float = (1.0 - t * t) 
+		var bend: float = lean * t * t
+		var p: Vector3 = base + Vector3.UP * (height * t) + dir * bend
+		var col: Color = col_bottom.lerp(col_top, t)
+		var uv_y: float = 1.0 - t
+		if si == segments:
+			var tip: int = add_vertex(p, n, Vector2(0.5, uv_y), col)
+			if prev_l >= 0:
+				add_triangle(prev_l, prev_r, tip)
+			return
+		var l: int = add_vertex(p - side * w, n, Vector2(0.0, uv_y), col)
+		var r: int = add_vertex(p + side * w, n, Vector2(1.0, uv_y), col)
+		if prev_l >= 0:
+			add_triangle(prev_l, prev_r, r)
+			add_triangle(prev_l, r, l)
+		prev_l = l
+		prev_r = r
+
+
 ## Commits into `target` (creating a new ArrayMesh when null) as one surface.
 func commit(target: ArrayMesh = null, material: Material = null) -> ArrayMesh:
 	var mesh: ArrayMesh = target if target != null else ArrayMesh.new()

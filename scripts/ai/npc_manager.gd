@@ -57,6 +57,10 @@ var _body_agent: PackedInt32Array = PackedInt32Array()
 var _mm_civ: MultiMeshInstance3D
 var _mm_enemy: MultiMeshInstance3D
 var _mm_far: MultiMeshInstance3D
+var _cap_reduced: int = 0
+var _cap_far: int = 0
+## Per-agent tint, resolved once at spawn instead of re-derived every frame.
+var _tint: PackedColorArray = PackedColorArray()
 
 # --- Budgets ----------------------------------------------------------------
 var budget_total: int = 70
@@ -95,6 +99,8 @@ func _build_multimeshes() -> void:
 	_mm_enemy = _make_mm("EnemyReduced", _mesh_lib.get_mesh("enemy_l0"),
 		GameConfig.MAX_REDUCED_NPCS)
 	_mm_far = _make_mm("NPCBackground", _mesh_lib.get_mesh("npc_l1"), GameConfig.MAX_NPCS)
+	_cap_reduced = GameConfig.MAX_REDUCED_NPCS
+	_cap_far = GameConfig.MAX_NPCS
 
 
 func _make_mm(nm: String, mesh: Mesh, capacity: int) -> MultiMeshInstance3D:
@@ -174,6 +180,7 @@ func _alloc_slot() -> int:
 	_cooldown.push_back(0.0)
 	_scale.push_back(1.0)
 	_kind.push_back(0)
+	_tint.push_back(Color.WHITE)
 	_tier.push_back(Tier.DORMANT)
 	_state.push_back(AIState.IDLE)
 	_body_slot.push_back(-1)
@@ -204,6 +211,7 @@ func spawn_agent(pos: Vector3, hostile: bool) -> int:
 	_cooldown[i] = 0.0
 	_scale[i] = _rng.randf_range(0.88, 1.16) * (1.0 + float(zone) * 0.03 if hostile else 1.0)
 	_kind[i] = kind
+	_tint[i] = _tint_for_kind(kind)
 	_tier[i] = Tier.DORMANT
 	_state[i] = AIState.WANDER
 	_body_slot[i] = -1
@@ -246,6 +254,14 @@ func _player_pos() -> Vector3:
 # Main loop
 # -----------------------------------------------------------------------------
 func _physics_process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("npc", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	if world_gen == null:
 		return
 	var pp: Vector3 = _player_pos()
@@ -255,10 +271,18 @@ func _physics_process(delta: float) -> void:
 		_spawn_cd = 0.25
 		_drain_spawn_queue(pp)
 
+	var _t: int = Time.get_ticks_usec()
 	_assign_tiers(pp)
+	PerformanceMonitor.record_subsystem("npc.tiers", Time.get_ticks_usec() - _t)
+	_t = Time.get_ticks_usec()
 	_run_ai(delta, pp)
+	PerformanceMonitor.record_subsystem("npc.ai", Time.get_ticks_usec() - _t)
+	_t = Time.get_ticks_usec()
 	_integrate(delta, pp)
+	PerformanceMonitor.record_subsystem("npc.integrate", Time.get_ticks_usec() - _t)
+	_t = Time.get_ticks_usec()
 	_update_instances(pp)
+	PerformanceMonitor.record_subsystem("npc.instances", Time.get_ticks_usec() - _t)
 	_publish_counters()
 
 
@@ -302,16 +326,21 @@ func _assign_tiers(pp: Vector3) -> void:
 	# instead we take a single pass and fill the tier budgets greedily by
 	# distance band, which is stable enough because agents move slowly relative
 	# to the band widths.
+	# Squared distances: the thresholds are constants, so the square root this
+	# used to take per agent per frame bought nothing.
+	const FULL_SQ: float = TIER_FULL_DISTANCE * TIER_FULL_DISTANCE
+	const REDUCED_SQ: float = TIER_REDUCED_DISTANCE * TIER_REDUCED_DISTANCE
+	const BACKGROUND_SQ: float = TIER_BACKGROUND_DISTANCE * TIER_BACKGROUND_DISTANCE
 	for i: int in _live_indices:
-		var d: float = _pos[i].distance_to(pp)
+		var d: float = _pos[i].distance_squared_to(pp)
 		var want: int = Tier.DORMANT
-		if d < TIER_FULL_DISTANCE and full_used < budget_full:
+		if d < FULL_SQ and full_used < budget_full:
 			want = Tier.FULL
 			full_used += 1
-		elif d < TIER_REDUCED_DISTANCE and reduced_used < budget_reduced:
+		elif d < REDUCED_SQ and reduced_used < budget_reduced:
 			want = Tier.REDUCED
 			reduced_used += 1
-		elif d < TIER_BACKGROUND_DISTANCE:
+		elif d < BACKGROUND_SQ:
 			want = Tier.BACKGROUND
 		if want != Tier.FULL and _body_slot[i] >= 0:
 			_release_body(i)
@@ -354,7 +383,11 @@ func _release_body(i: int) -> void:
 
 
 func _tint_for(i: int) -> Color:
-	match _kind[i]:
+	return _tint_for_kind(_kind[i])
+
+
+static func _tint_for_kind(kind: int) -> Color:
+	match kind:
 		Kind.CIVILIAN:
 			return Color(0.45, 0.48, 0.56)
 		Kind.SCAVENGER:
@@ -447,9 +480,9 @@ func _integrate(delta: float, pp: Vector3) -> void:
 		_dormant_accum = 0.0
 
 	var despawn: Array[int] = []
+	const DESPAWN_SQ: float = DESPAWN_DISTANCE * DESPAWN_DISTANCE
 	for i: int in _live_indices:
-		var d: float = _pos[i].distance_to(pp)
-		if d > DESPAWN_DISTANCE:
+		if _pos[i].distance_squared_to(pp) > DESPAWN_SQ:
 			despawn.append(i)
 			continue
 		match _tier[i]:
@@ -502,6 +535,13 @@ func _step_full(i: int, delta: float, pp: Vector3) -> void:
 		_attack(i, pp)
 
 
+## Ground height, from the streamed chunk grid when one is loaded.
+func _ground(x: float, z: float) -> float:
+	if streamer != null:
+		return streamer.sample_height(x, z)
+	return world_gen.height(x, z)
+
+
 func _step_kinematic(i: int, dt: float, speed_scale: float) -> void:
 	var p: Vector3 = _pos[i]
 	var to_goal: Vector3 = _goal[i] - p
@@ -513,7 +553,7 @@ func _step_kinematic(i: int, dt: float, speed_scale: float) -> void:
 		_vel[i] = step / maxf(dt, 0.0001)
 	else:
 		_vel[i] = Vector3.ZERO
-	p.y = world_gen.height(p.x, p.z)
+	p.y = _ground(p.x, p.z)
 	_pos[i] = p
 
 	if _state[i] == AIState.ATTACK and _kind[i] >= Kind.STALKER and _cooldown[i] <= 0.0:
@@ -618,24 +658,40 @@ func _update_instances(pp: Vector3) -> void:
 				continue
 
 		var yaw: float = atan2(_vel[i].x, _vel[i].z)
-		var basis: Basis = Basis(Vector3.UP, yaw).scaled(Vector3.ONE * _scale[i])
-		var xf := Transform3D(basis, _pos[i])
+		var cy: float = cos(yaw)
+		var sy: float = sin(yaw)
+		var sc: float = _scale[i]
+		var pos: Vector3 = _pos[i]
+		var tint: Color = _tint[i]
+		# Direct per-instance writes. A bulk MultiMesh.buffer assignment was
+		# tried here and measured worse (1.11 ms vs 0.2 ms for ~74 agents):
+		# building the packed array needs a slice, and the assignment copies it
+		# again, so two allocations a frame cost more than the binding calls
+		# they replaced.
+		var basis := Basis(
+			Vector3(cy * sc, 0.0, -sy * sc),
+			Vector3(0.0, sc, 0.0),
+			Vector3(sy * sc, 0.0, cy * sc))
+		var xf := Transform3D(basis, pos)
 		if _tier[i] == Tier.REDUCED:
 			if hostile:
-				if enemy < mm_en.instance_count:
-					mm_en.set_instance_transform(enemy, xf)
-					mm_en.set_instance_color(enemy, _tint_for(i))
-					enemy += 1
+				if enemy >= _cap_reduced:
+					continue
+				mm_en.set_instance_transform(enemy, xf)
+				mm_en.set_instance_color(enemy, tint)
+				enemy += 1
 			else:
-				if civ < mm_civ.instance_count:
-					mm_civ.set_instance_transform(civ, xf)
-					mm_civ.set_instance_color(civ, _tint_for(i))
-					civ += 1
+				if civ >= _cap_reduced:
+					continue
+				mm_civ.set_instance_transform(civ, xf)
+				mm_civ.set_instance_color(civ, tint)
+				civ += 1
 		else:
-			if far < mm_far.instance_count:
-				mm_far.set_instance_transform(far, xf)
-				mm_far.set_instance_color(far, _tint_for(i))
-				far += 1
+			if far >= _cap_far:
+				continue
+			mm_far.set_instance_transform(far, xf)
+			mm_far.set_instance_color(far, tint)
+			far += 1
 
 	mm_civ.visible_instance_count = civ
 	mm_en.visible_instance_count = enemy

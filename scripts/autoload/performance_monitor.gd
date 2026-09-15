@@ -126,10 +126,12 @@ func _process(delta: float) -> void:
 	else:
 		_low_fps_timer = 0.0
 
+	_sub_frames += 1
 	_accum += delta
 	if _accum < _sample_interval:
 		return
 	_accum = 0.0
+	_flush_subsystems()
 	_sample_slow()
 
 
@@ -191,6 +193,109 @@ func process_memory_mb() -> float:
 		m += video_mem_mb
 	m += float(counters.get("chunk_cache_mb", 0.0))
 	return m
+
+
+# -----------------------------------------------------------------------------
+# Subsystem CPU profiler
+# -----------------------------------------------------------------------------
+## Per-frame wall time spent inside each manager's own callback, in
+## microseconds, smoothed. Performance.TIME_PROCESS cannot be used for this:
+## it covers the whole idle step, and on a single-threaded or GPU-bound frame
+## the driver wait lands inside it, so it reads as script cost when it is not.
+## These numbers are measured with Time.get_ticks_usec() around the actual
+## callback body, so they mean the same thing on a phone as on a desktop.
+var subsystem_usec: Dictionary = {}
+var _sub_accum: Dictionary = {}
+var _sub_frames: int = 0
+
+
+func record_subsystem(key: String, usec: int) -> void:
+	_sub_accum[key] = int(_sub_accum.get(key, 0)) + usec
+
+
+func _flush_subsystems() -> void:
+	if _sub_frames <= 0:
+		return
+	for k: String in _sub_accum:
+		subsystem_usec[k] = float(_sub_accum[k]) / float(_sub_frames)
+	_sub_accum.clear()
+	_sub_frames = 0
+
+
+## Total measured script time across all instrumented subsystems, in ms.
+## Keys containing a dot are sub-phases of another entry (npc.integrate inside
+## npc), so counting them here would double-count that manager's time.
+func subsystem_total_ms() -> float:
+	var t: float = 0.0
+	for k: String in subsystem_usec:
+		if k.contains("."):
+			continue
+		t += float(subsystem_usec[k])
+	return t / 1000.0
+
+
+## One packaged snapshot of every measurement the engine actually provides,
+## for the benchmark record and the smoke report. Values the platform does not
+## expose come back as null, never as a plausible-looking number.
+func telemetry() -> Dictionary:
+	return {
+		"fps": fps,
+		"avg_fps": avg_fps,
+		"frame_ms": frame_ms,
+		"low_1pc_fps": low_1pc_fps,
+		"process_ms": process_ms,
+		"physics_ms": physics_ms,
+		"render_cpu_ms": render_cpu_ms if have_render_cpu_time else null,
+		"render_gpu_ms": render_gpu_ms if have_gpu_time else null,
+		"draw_calls": draw_calls if have_draw_calls else null,
+		"objects_in_frame": objects_in_frame if have_draw_calls else null,
+		"primitives": primitives if have_draw_calls else null,
+		"video_mem_mb": video_mem_mb if have_video_mem else null,
+		"texture_mem_mb": texture_mem_mb if have_video_mem else null,
+		"buffer_mem_mb": buffer_mem_mb if have_video_mem else null,
+		"static_mem_mb": static_mem_mb,
+		"process_mem_mb": process_memory_mb(),
+		"os_mem_physical_mb": os_mem_physical_mb if have_os_memory else null,
+		"os_mem_available_mb": os_mem_available_mb if have_os_memory else null,
+		"node_count": node_count,
+		"orphan_nodes": orphan_nodes,
+		"physics_active": physics_active,
+		"physics_pairs": physics_pairs,
+		"npc_total": counters.get("npc_total", 0),
+		"npc_full": counters.get("npc_full", 0),
+		"npc_reduced": counters.get("npc_reduced", 0),
+		"npc_background": counters.get("npc_background", 0),
+		"rigid_bodies": counters.get("rigid_bodies", 0),
+		"chunks_loaded": counters.get("chunks_loaded", 0),
+		"chunks_cached": counters.get("chunks_cached", 0),
+		"chunk_cache_mb": counters.get("chunk_cache_mb", 0.0),
+		"multimesh_instances": counters.get("multimesh_instances", 0),
+		"subsystem_ms": _subsystem_ms_dict(),
+		"subsystem_total_ms": subsystem_total_ms(),
+		"unavailable": _unavailable_list(),
+	}
+
+
+func _subsystem_ms_dict() -> Dictionary:
+	var out: Dictionary = {}
+	for k: String in subsystem_usec:
+		out[k] = snappedf(float(subsystem_usec[k]) / 1000.0, 0.001)
+	return out
+
+
+func _unavailable_list() -> PackedStringArray:
+	var out := PackedStringArray()
+	if not have_gpu_time:
+		out.append("render_gpu_ms")
+	if not have_render_cpu_time:
+		out.append("render_cpu_ms")
+	if not have_draw_calls:
+		out.append("draw_calls/objects/primitives")
+	if not have_video_mem:
+		out.append("video_mem")
+	if not have_os_memory:
+		out.append("os_memory")
+	return out
 
 
 ## 1% low derived from the worst 1% of frame times over the long window.

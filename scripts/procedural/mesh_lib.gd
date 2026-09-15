@@ -208,32 +208,35 @@ func _build_trees() -> void:
 
 
 func _build_ground_cover() -> void:
-	# Three grass clusters of different height and hue. Scattering a mix
-	# instead of one repeated card is most of what stops ground cover reading
-	# as a tiled pattern.
-	# Card sizes are deliberately small. At 0.7-0.9 m across, a clump filled
-	# most of a square metre on its own and ground cover read as a field of
-	# lettuce; the density now comes from the number of instances instead,
-	# which is also the load the stress test wants.
+	# Three tuft species of different height and hue. Each blade is real
+	# geometry that tapers to a point, so the material needs no alpha test --
+	# see shaders/grass_solid.gdshader for why that matters at this instance
+	# count. A tuft is ~5 blades x 5 triangles; the l1 variant drops to two
+	# blades for everything past the near LOD band.
 	var variants: Array[Dictionary] = [
-		{"clumps": 4, "w": 0.40, "h": 0.46,
-			"bottom": Color(0.15, 0.22, 0.08), "top": Color(0.52, 0.68, 0.26)},
-		{"clumps": 3, "w": 0.46, "h": 0.64,
-			"bottom": Color(0.13, 0.20, 0.07), "top": Color(0.44, 0.60, 0.21)},
-		{"clumps": 5, "w": 0.34, "h": 0.34,
-			"bottom": Color(0.18, 0.25, 0.10), "top": Color(0.60, 0.72, 0.32)},
+		{"blades": 6, "w": 0.085, "h": 0.46, "lean": 0.10,
+			"bottom": Color(0.13, 0.20, 0.07), "top": Color(0.56, 0.72, 0.28)},
+		{"blades": 5, "w": 0.075, "h": 0.68, "lean": 0.16,
+			"bottom": Color(0.11, 0.18, 0.06), "top": Color(0.46, 0.63, 0.22)},
+		{"blades": 7, "w": 0.095, "h": 0.34, "lean": 0.07,
+			"bottom": Color(0.16, 0.23, 0.09), "top": Color(0.63, 0.76, 0.34)},
 	]
 	for v in variants.size():
 		var cfg: Dictionary = variants[v]
 		for lod in 2:
 			var b := MeshBuilder.new()
-			var clumps: int = int(cfg["clumps"]) if lod == 0 else 1
-			for i in clumps:
-				var ang: float = float(i) * 1.77 + float(v)
-				var off := Vector3(cos(ang) * 0.12, 0.0, sin(ang) * 0.12)
-				b.add_cross_card(off, float(cfg["w"]),
-					float(cfg["h"]) * (1.0 - float(i) * 0.07),
-					cfg["bottom"], cfg["top"], ang)
+			var blades: int = int(cfg["blades"]) if lod == 0 else 2
+			var segs: int = 4 if lod == 0 else 2
+			for i in blades:
+				# Golden-angle spread so no two blades in a tuft line up and no
+				# two tufts share a silhouette once the instance yaw varies.
+				var ang: float = float(i) * 2.39996 + float(v) * 0.7
+				var rad: float = 0.045 * sqrt(float(i) / float(maxi(blades, 1)))
+				var off := Vector3(cos(ang) * rad, 0.0, sin(ang) * rad)
+				var hs: float = 1.0 - float(i) * 0.06
+				b.add_blade(off, ang, float(cfg["w"]),
+					float(cfg["h"]) * hs, float(cfg["lean"]),
+					cfg["bottom"], cfg["top"], segs)
 			meshes["grass%d_l%d" % [v, lod]] = b.commit(null, _mat.grass)
 	# Legacy keys, so any batch still asking for "grass_l*" resolves.
 	meshes["grass_l0"] = meshes["grass0_l0"]

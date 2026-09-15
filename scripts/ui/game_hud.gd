@@ -137,6 +137,14 @@ func _on_kill(_kind: String, _pos: Vector3) -> void:
 
 # --- Update ----------------------------------------------------------------
 func _process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("hud_game", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	_pulse += delta
 	var k: float = clampf(delta * 7.0, 0.0, 1.0)
 	_hp = lerpf(_hp, GameState.health / maxf(1.0, GameState.max_health), k)

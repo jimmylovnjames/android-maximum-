@@ -13,6 +13,16 @@ var height_min: float = 0.0
 var height_max: float = 0.0
 var has_water: bool = false
 
+## The generator's height grid, kept rather than discarded. Anything that needs
+## to know where the ground is -- agents, traffic, spawn placement -- can then
+## do four array reads instead of re-evaluating the analytic world function,
+## which costs about ten FastNoiseLite samples plus a domain warp every call.
+## At 33x33 floats this is ~4.4 KB per chunk, and it is legitimate cached world
+## data, so it also counts honestly towards the memory budget.
+var heights: PackedFloat32Array = PackedFloat32Array()
+var height_side: int = 0
+var height_cell: float = 1.0
+
 ## Surface arrays for each terrain LOD, nearest first.
 var terrain_lods: Array = []
 var collision_faces: PackedVector3Array = PackedVector3Array()
@@ -44,6 +54,7 @@ func estimated_bytes() -> int:
 		var idx: PackedInt32Array = lod[Mesh.ARRAY_INDEX]
 		b += v.size() * 48 + idx.size() * 4
 	b += collision_faces.size() * 12
+	b += heights.size() * 4
 	for k: String in batches.keys():
 		b += (batches[k] as InstanceBatch).bytes()
 	b += (npc_spawns.size() + enemy_spawns.size() + vehicle_spawns.size()

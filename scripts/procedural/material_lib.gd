@@ -12,6 +12,7 @@ const SH_WATER := "res://shaders/water.gdshader"
 const SH_SKY := "res://shaders/sky.gdshader"
 const SH_PROP := "res://shaders/prop_instanced.gdshader"
 const SH_NEON := "res://shaders/neon.gdshader"
+const SH_GRASS := "res://shaders/grass_solid.gdshader"
 
 var terrain: ShaderMaterial
 var grass: ShaderMaterial
@@ -124,7 +125,7 @@ func rebuild(preset: int) -> void:
 	var imp_birch: ImageTexture = TextureLib.tree_impostor_mask(2, imp_size, seed_base + 23)
 	_tex_bytes += imp_size * imp_size * 4 * 3
 
-	var grass_mask: ImageTexture = TextureLib.grass_blade_mask(64, 128, seed_base + 7)
+	# grass_blade_mask is no longer needed: the blade shape is geometry now.
 	var leaf_mask: ImageTexture = TextureLib.leaf_cluster_mask(128, seed_base + 8)
 	_tex_bytes += 64 * 128 * 4 + 128 * 128 * 4
 
@@ -138,14 +139,15 @@ func rebuild(preset: int) -> void:
 	terrain.set_shader_parameter("normal_strength", 0.38)
 
 	# --- Vegetation ----------------------------------------------------------
-	grass = _shader_mat(SH_VEGETATION, grass)
-	grass.set_shader_parameter("leaf_mask", grass_mask)
+	# Ground cover gets its own alpha-free shader: it is the most numerous
+	# material in the world by an order of magnitude, so it is the one that
+	# cannot afford to lose early-Z to a discard.
+	grass = _shader_mat(SH_GRASS, grass)
 	grass.set_shader_parameter("wind_strength", 0.55)
 	grass.set_shader_parameter("wind_speed", 2.1)
 	grass.set_shader_parameter("stiffness", 0.15)
-	grass.set_shader_parameter("alpha_cut", 0.22)
 	grass.set_shader_parameter("translucency", 0.55)
-	grass.set_shader_parameter("use_mask", true)
+	grass.set_shader_parameter("ao_strength", 0.45)
 
 	foliage = _shader_mat(SH_VEGETATION, foliage)
 	foliage.set_shader_parameter("leaf_mask", leaf_mask)

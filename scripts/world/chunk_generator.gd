@@ -117,6 +117,9 @@ static func generate(gen: WorldGen, coord: Vector2i, opts: Dictionary) -> ChunkD
 	if bool(opts.get("collision", false)):
 		d.collision_faces = _collision_faces_overlapped(gen, d, heights, n)
 
+	d.heights = heights
+	d.height_side = n
+	d.height_cell = CELL
 	var field := ChunkField.new(heights, n, CELL, d.origin.x, d.origin.z)
 	_scatter_vegetation(gen, d, opts, field)
 	_build_structures(gen, d, opts, field)

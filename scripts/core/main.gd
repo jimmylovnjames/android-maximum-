@@ -532,6 +532,7 @@ func _finish_test_run() -> void:
 		"avg_fps": p.avg_fps,
 		"display_server": DisplayServer.get_name(),
 		"counters": p.counters.duplicate(),
+		"telemetry": p.telemetry(),
 		"world_stats": world.world_stats() if world != null else {},
 		"ground_probe": world.debug_probe() if world != null else {},
 		"stress": {

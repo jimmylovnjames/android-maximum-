@@ -52,6 +52,14 @@ func _on_chunk_unloaded(coord: Vector2i) -> void:
 
 
 func _process(_delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(_delta)
+	PerformanceMonitor.record_subsystem("lod", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(_delta: float) -> void:
 	if streamer == null or focus == null or not is_instance_valid(focus):
 		return
 	if _dirty or _keys.size() != streamer.active.size():

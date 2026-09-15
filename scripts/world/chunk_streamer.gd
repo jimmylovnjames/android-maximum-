@@ -46,6 +46,7 @@ var _mesh_lib: MeshLib = null
 var _mat_lib: MaterialLib = null
 var _last_focus_coord: Vector2i = Vector2i(999999, 999999)
 var _gen_veg_step: float = -1.0
+var _census_accum: float = 0.0
 var _stats_gen_ms: float = 0.0
 var _generated_total: int = 0
 var _enabled: bool = true
@@ -117,6 +118,32 @@ func is_ready_at(p: Vector3) -> bool:
 	return ch != null and ch.realized
 
 
+## Ground height from the already-generated chunk grid: four array reads and a
+## bilinear blend. The analytic fallback is ~10 FastNoiseLite samples plus a
+## domain warp, and agents were paying that once per agent per frame purely to
+## stay on the ground -- measured at 2.5 ms of the 3.9 ms the NPC manager spent
+## per frame in a forest. Falls back to the world function only for positions
+## outside every loaded chunk, where there is no grid to read.
+func sample_height(x: float, z: float) -> float:
+	var c: Vector2i = world_to_coord(Vector3(x, 0.0, z))
+	var d: ChunkData = get_chunk_data(c)
+	if d == null or d.height_side <= 1:
+		return world_gen.height(x, z) if world_gen != null else 0.0
+	var n: int = d.height_side
+	var fx: float = clampf((x - d.origin.x) / d.height_cell, 0.0, float(n - 1))
+	var fz: float = clampf((z - d.origin.z) / d.height_cell, 0.0, float(n - 1))
+	var i0: int = int(fx)
+	var j0: int = int(fz)
+	var i1: int = mini(i0 + 1, n - 1)
+	var j1: int = mini(j0 + 1, n - 1)
+	var tx: float = fx - float(i0)
+	var tz: float = fz - float(j0)
+	var h: PackedFloat32Array = d.heights
+	var a: float = lerpf(h[j0 * n + i0], h[j0 * n + i1], tx)
+	var b: float = lerpf(h[j1 * n + i0], h[j1 * n + i1], tx)
+	return lerpf(a, b, tz)
+
+
 func get_chunk_data(c: Vector2i) -> ChunkData:
 	var ch: WorldChunk = active.get(c, null)
 	if ch != null and ch.data != null:
@@ -145,6 +172,14 @@ func last_gen_ms() -> float:
 
 
 func _process(_delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(_delta)
+	PerformanceMonitor.record_subsystem("streamer", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(_delta: float) -> void:
 	if not _enabled or world_gen == null:
 		return
 	_update_memory_guard(_delta)
@@ -155,23 +190,35 @@ func _process(_delta: float) -> void:
 		_last_focus_coord = fc
 		_refresh_desired(fc)
 	_dispatch(fc)
-	_publish_counters()
+	_publish_counters(_delta)
 
 
-func _publish_counters() -> void:
+## Cheap counters every frame; the per-chunk geometry census on a timer.
+##
+## The census walks every batch node of every active chunk and reads two
+## MultiMesh properties off each one. At a streaming radius of 10 that is
+## ~8,800 property fetches through the Object binding per frame, and it existed
+## only to drive HUD numbers that are displayed at 10 Hz. It measured 3.4 ms a
+## frame in a forest -- the largest single script cost in the game -- so it now
+## runs five times a second instead of sixty.
+const CENSUS_INTERVAL: float = 0.2
+
+func _publish_counters(delta: float) -> void:
 	PerformanceMonitor.set_counter("chunks_loaded", active.size())
 	PerformanceMonitor.set_counter("chunks_cached", _cache.size())
 	PerformanceMonitor.set_counter("chunk_cache_mb", cache_megabytes())
 	PerformanceMonitor.set_counter("stream_queue", pending_count())
 	PerformanceMonitor.set_counter("active_world_mb", active_megabytes())
 	PerformanceMonitor.set_counter("stream_radius", effective_radius())
+
+	_census_accum += delta
+	if _census_accum < CENSUS_INTERVAL:
+		return
+	_census_accum = 0.0
 	var inst: int = 0
 	var by_category: Dictionary = {}
 	for c: Vector2i in active.keys():
-		var ch: WorldChunk = active[c]
-		if ch.realized:
-			inst += ch.visible_instances()
-			ch.accumulate_category_counts(by_category)
+		inst += (active[c] as WorldChunk).accumulate_counts(by_category)
 	PerformanceMonitor.set_counter("multimesh_instances", inst)
 	PerformanceMonitor.set_counter("buildings", int(by_category.get("building", 0)))
 	PerformanceMonitor.set_counter("grass_instances", int(by_category.get("grass", 0)))

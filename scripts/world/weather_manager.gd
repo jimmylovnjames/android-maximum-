@@ -149,6 +149,14 @@ func cycle() -> void:
 
 
 func _process(delta: float) -> void:
+	# Timed so the benchmark can separate this manager's script cost from
+	# render and physics time. See PerformanceMonitor.record_subsystem.
+	var _t0: int = Time.get_ticks_usec()
+	_step_profiled(delta)
+	PerformanceMonitor.record_subsystem("weather", Time.get_ticks_usec() - _t0)
+
+
+func _step_profiled(delta: float) -> void:
 	wind = move_toward(wind, _target_wind, delta * 0.45)
 	wetness = move_toward(wetness, _target_wetness, delta * 0.25)
 	GameConfig.set_shader_global("redline_wind", wind)
