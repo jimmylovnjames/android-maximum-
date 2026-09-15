@@ -79,7 +79,25 @@ adb install -r export/redline-arm64.apk
 ```
 
 The default preset uses Godot's prebuilt Android template, so Android Studio
-and the Gradle build path are not required.
+and the Gradle build path are not required. (That path is also why
+`gradle_build/min_sdk` and `target_sdk` are left empty in the preset — Godot
+refuses to export if they are set without Gradle enabled.)
+
+### What the build produces
+
+Verified with `apksigner` and `aapt2` against the artifact, not assumed:
+
+| | |
+| --- | --- |
+| Size | ~27 MB |
+| Package | `com.redline.stresstest` 0.1.0 |
+| Native code | `arm64-v8a` only |
+| minSdk / targetSdk | 24 / 35 |
+| Signature | APK Signature Scheme v2 + v3, RSA 3072 |
+| Orientation | `sensorLandscape` |
+| Permissions | **none** |
+| Declared features | `android.hardware.vulkan.level`, `android.hardware.vulkan.version` |
+| Scripts | shipped as compiled bytecode (`.gdc`) |
 
 ### Looking at it without a GPU
 
