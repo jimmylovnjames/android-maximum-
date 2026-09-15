@@ -11,7 +11,7 @@ uniform float tex_scale = 0.5;
 uniform float base_roughness = 0.78;
 uniform float base_metallic = 0.0;
 uniform vec4 emission_tint : source_color = vec4(1.0, 0.55, 0.2, 1.0);
-uniform float emission_energy = 2.5;
+uniform float emission_energy = 1.9;
 
 global uniform float redline_night;
 global uniform float redline_wetness;

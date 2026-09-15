@@ -12,8 +12,8 @@ uniform float window_h = 1.7;
 uniform float window_fill = 0.46;
 uniform vec4 window_day : source_color = vec4(0.11, 0.14, 0.17, 1.0);
 uniform vec4 window_lit : source_color = vec4(1.0, 0.82, 0.52, 1.0);
-uniform float emission_energy = 3.2;
-uniform float lit_fraction : hint_range(0.0, 1.0) = 0.42;
+uniform float emission_energy = 1.85;
+uniform float lit_fraction : hint_range(0.0, 1.0) = 0.38;
 uniform float wall_roughness = 0.82;
 
 global uniform float redline_night;

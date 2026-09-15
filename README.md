@@ -57,6 +57,9 @@ Useful command line flags:
 | `--godmode` | Invulnerable, for screenshots and long captures |
 | `--show-menu` | Boot to the title screen instead of straight into the world |
 | `--safety-off` | Development only: disables the low-FPS watchdog so the UI can be captured under a software renderer. Never set in a shipped build |
+| `--no-hostiles` | Development only: stops creatures spawning, so captures are not filled by something chewing on the camera |
+| `--look=DEG` | Initial camera bearing |
+| `--gallery-filter=SUBSTR` | Restrict `--mesh-gallery` to matching mesh keys, so one asset can be inspected at a useful size |
 | `--mesh-gallery` | Lay every procedural mesh out on a grid for inspection |
 | `--shots=a,b,c --shot-dir=DIR` | Save the framebuffer at those elapsed seconds |
 
@@ -185,6 +188,37 @@ navigation furniture stands down while the expanded telemetry panel is open.
 `F2` cycles HUD off → compact → expanded. Compact is a corner readout with an
 inline FPS sparkline. Expanded is the benchmark view: FRAME, RENDER, MEMORY and
 WORLD groups plus FPS, frame time, memory and GPU graphs.
+
+## Memory and world density
+
+The retention cache target is **derived from the device**, not hard-coded per
+preset: `AdaptiveQualityManager.device_cache_budget_mb()` takes a conservative
+slice of the physical RAM the platform reports (20% on mobile, 28% on desktop)
+and clamps it to a 6 GB ceiling. The preset's own figure is then clamped to
+that. A fixed number is wrong in both directions — it wastes a 24 GB phone and
+gets a 4 GB one killed.
+
+Active chunks are budgeted separately from the retained ones. The retained set
+is ground the player has already walked past; the active set is what is on
+screen, so it gets twice the allowance. `ChunkStreamer` tracks the bytes the
+chunks *actually* turned out to need — a dense city block costs far more than
+open forest — and trims the streaming radius when it goes over, rather than
+predicting from the radius alone.
+
+On a 24 GB device at MELTDOWN + INSANE this resolves to roughly:
+
+| | |
+| --- | --- |
+| Drawn MultiMesh instances | ~900k |
+| Agents / hostiles | 2200 / 646 |
+| Rigid bodies | 1200 |
+| Vehicles | 320 |
+| Streaming radius | 12 chunks (625 × 64 m) |
+| View distance | 4000 m |
+| Cache ceiling | 3 GB, ×2.5 in high-memory mode |
+
+None of that is ballast. Every megabyte is generated terrain, instance buffers,
+collision meshes and procedural textures that the renderer is reading.
 
 ## Stress levels and quality presets
 

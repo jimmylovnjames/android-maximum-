@@ -41,6 +41,8 @@ var _gallery_filter: String = ""
 var _godmode: bool = false
 var _show_menu: bool = false
 var _safety_off: bool = false
+var _no_hostiles: bool = false
+var _start_look_deg: float = NAN
 
 
 func _ready() -> void:
@@ -203,6 +205,12 @@ func _parse_cli() -> void:
 			_godmode = true
 		elif arg == "--show-menu":
 			_show_menu = true
+		elif arg == "--no-hostiles":
+			# Development only: keeps creatures out of the frame while
+			# capturing the world. Does not touch the shipped balance.
+			_no_hostiles = true
+		elif arg.begins_with("--look="):
+			_start_look_deg = float(arg.split("=")[1])
 		elif arg == "--safety-off":
 			# Development only, for capturing the interface under a software
 			# renderer where the low-FPS watchdog would otherwise fire
@@ -236,6 +244,11 @@ func _start_game() -> void:
 	if _start_time >= 0.0:
 		world.day_night.set_time(_start_time)
 		world.day_night.paused = true
+
+	if _no_hostiles and world.npcs != null:
+		world.npcs.hostiles_enabled = false
+	if not is_nan(_start_look_deg) and world.player != null:
+		world.player.set_yaw(deg_to_rad(_start_look_deg))
 
 	GameState.reset_run()
 	GameState.set_phase(GameState.Phase.PLAYING)

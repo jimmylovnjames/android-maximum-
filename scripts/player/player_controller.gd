@@ -475,6 +475,13 @@ func take_damage(amount: float, source: Object = null, _normal: Vector3 = Vector
 	GameState.damage(amount, "combat", origin_pos)
 
 
+## Points the camera without moving the player. Used by the capture flags and
+## by anything that needs to frame a view.
+func set_yaw(radians: float) -> void:
+	_yaw = radians
+	rotation.y = _yaw
+
+
 func teleport(pos: Vector3, face_yaw: float = 0.0) -> void:
 	global_position = pos
 	velocity = Vector3.ZERO

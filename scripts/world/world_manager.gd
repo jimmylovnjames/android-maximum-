@@ -217,6 +217,8 @@ func _process(delta: float) -> void:
 
 	if traffic != null and day_night != null:
 		traffic.set_night(day_night.night_factor)
+	if day_night != null:
+		day_night.set_urban_factor(world_gen.urban_factor(pp.x, pp.z))
 
 	_light_cd -= delta
 	if _light_cd <= 0.0:

@@ -496,18 +496,25 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			# Lit signage. Dense in the city, industrial and REDLINE bands;
 			# absent in the settlement, where it would look wrong.
 			if zone >= GameConfig.Zone.TOWN:
-				var sign_count: int = 1 + int(WorldGen.hash_range(
-					int(cx), int(cz), 57, 0.0, 2.9))
+				var sign_count: int = 2 + int(WorldGen.hash_range(
+					int(cx), int(cz), 57, 0.0, 3.4))
 				for si in sign_count:
-					if WorldGen.hash_f(int(cx) + si * 13, int(cz), 58) > 0.55:
+					if WorldGen.hash_f(int(cx) + si * 13, int(cz), 58) > 0.72:
 						continue
 					var face: int = WorldGen.hash_i(int(cx) + si, int(cz), 59) % 4
 					var yaw_s: float = float(face) * PI * 0.5
-					var out_w: float = (w if face % 2 == 0 else dp) * podium_scale * 0.5 + 0.2
+					# Faces 0 and 2 look along Z, so they stand off by half the
+					# footprint's *depth*; faces 1 and 3 by half its width.
+					# Getting this the wrong way round buries the sign inside
+					# the building whenever the footprint is not square.
+					var half_extent: float = (dp if face % 2 == 0 else w) * 0.5
+					var out_w: float = half_extent * podium_scale + 0.28
 					var off := Vector3(sin(yaw_s) * out_w, 0.0, cos(yaw_s) * out_w)
+					# Signage lives on the lower floors, which is both where it
+					# belongs and where the podium scale is the right one to use.
 					var sy: float = base_y + FLOOR_HEIGHT * (
-						1.3 + WorldGen.hash_range(int(cx) + si, int(cz), 60,
-							0.0, float(maxi(floors - 2, 1))))
+						1.2 + WorldGen.hash_range(int(cx) + si, int(cz), 60,
+							0.0, float(clampi(maxi(podium, 2), 2, 4))))
 					var neon: Color = NEON_COLORS[
 						WorldGen.hash_i(int(cx) + si * 7, int(cz), 61) % NEON_COLORS.size()]
 					signs.add_simple(
@@ -518,7 +525,7 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 						# y = emission strength, w = use my own colour.
 						Color(0.0, 1.0, 0.25, 1.0))
 
-			if floors >= 7 and WorldGen.hash_f(int(cx), int(cz), 63) < 0.35:
+			if floors >= 7 and WorldGen.hash_f(int(cx), int(cz), 63) < 0.45:
 				var hcol: Color = NEON_COLORS[
 					WorldGen.hash_i(int(cx), int(cz), 64) % NEON_COLORS.size()]
 				hoardings.add_simple(

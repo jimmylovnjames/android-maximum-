@@ -24,6 +24,9 @@ var _shadow_splits: int = 2
 var _fog_detail: int = 1
 var _glow: bool = true
 var _storm_blend: float = 0.0
+## How built-up the player's surroundings are, 0..1. Drives the night ambient
+## floor so a city is not as dark as open wilderness.
+var _urban: float = 0.0
 
 
 func setup(mat: MaterialLib) -> void:
@@ -69,6 +72,7 @@ func setup(mat: MaterialLib) -> void:
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	environment.ambient_light_sky_contribution = 0.85
+	environment.ambient_light_color = Color(0.55, 0.62, 0.78)
 	environment.ambient_light_energy = 0.5
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
@@ -93,8 +97,11 @@ func setup(mat: MaterialLib) -> void:
 	environment.glow_strength = 1.0
 	environment.glow_bloom = 0.12
 	environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	environment.glow_hdr_threshold = 0.95
-	environment.glow_hdr_scale = 2.0
+	# Threshold well above the lit-window value: at 0.95 with a 2.0 scale every
+	# window bloomed into its neighbours and the city read as floating lights
+	# over a black void.
+	environment.glow_hdr_threshold = 1.7
+	environment.glow_hdr_scale = 0.9
 	# Weight the wider blur levels so bloom is a soft halo, not a hard ring.
 	# set_glow_level is zero-indexed; the inspector labels the same slots 1..7.
 	for i in 7:
@@ -149,6 +156,10 @@ func advance(delta: float) -> void:
 	hours = fposmod(hours + delta * (24.0 / maxf(1.0, day_length)), 24.0)
 
 
+func set_urban_factor(v: float) -> void:
+	_urban = clampf(v, 0.0, 1.0)
+
+
 func set_storm_blend(v: float) -> void:
 	_storm_blend = clampf(v, 0.0, 1.0)
 	if _mat != null and _mat.sky_material != null:
@@ -193,13 +204,18 @@ func _update(_force: bool) -> void:
 		var fc: Color = day_fog.lerp(dusk_fog, dusk * 0.8).lerp(night_fog, night_factor)
 		environment.fog_light_color = fc.lerp(Color(0.42, 0.44, 0.48), _storm_blend * 0.7)
 		environment.fog_density = lerpf(0.0010, 0.0042, _storm_blend) * (1.0 + night_factor * 0.4)
-		environment.ambient_light_energy = lerpf(0.62, 0.16, night_factor)
+		# Light pollution: a built-up area never goes as dark as open country,
+		# and without this the facades between the windows are pure black.
+		var night_floor: float = lerpf(0.16, 0.42, _urban)
+		environment.ambient_light_energy = lerpf(0.62, night_floor, night_factor)
+		environment.ambient_light_color = Color(0.55, 0.62, 0.78).lerp(
+			Color(0.95, 0.80, 0.62), _urban * night_factor)
 		environment.fog_height_density = lerpf(0.05, 0.16, _storm_blend) \
 			* lerpf(1.0, 2.1, night_factor)
 		environment.fog_height = lerpf(7.0, 2.5, _storm_blend)
-		environment.adjustment_saturation = lerpf(1.12, 0.86, night_factor)
-		environment.adjustment_contrast = lerpf(1.14, 1.22, night_factor)
-		environment.glow_intensity = lerpf(0.45, 0.95, night_factor) if _glow else 0.0
+		environment.adjustment_saturation = lerpf(1.12, 0.95, night_factor)
+		environment.adjustment_contrast = lerpf(1.14, 1.08, night_factor)
+		environment.glow_intensity = lerpf(0.38, 0.62, night_factor) if _glow else 0.0
 
 	GameConfig.set_shader_global("redline_night", night_factor)
 	time_changed.emit(hours)

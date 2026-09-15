@@ -73,6 +73,8 @@ var _mesh_lib: MeshLib
 var _counts: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
 var _spawn_cd: float = 0.0
+## Development switch (see main.gd --no-hostiles). Shipped builds leave this on.
+var hostiles_enabled: bool = true
 
 
 func setup(gen: WorldGen, s: ChunkStreamer, mesh_lib: MeshLib, p: Node3D,
@@ -181,6 +183,8 @@ func _alloc_slot() -> int:
 
 func spawn_agent(pos: Vector3, hostile: bool) -> int:
 	if _live_indices.size() >= budget_total:
+		return -1
+	if hostile and not hostiles_enabled:
 		return -1
 	var i: int = _alloc_slot()
 	var zone: int = GameConfig.zone_for_position(pos)
