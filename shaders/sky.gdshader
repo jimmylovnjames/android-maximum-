@@ -86,8 +86,11 @@ void sky() {
 		col += sun_color * pow(towards, 5.0) * 0.16 * (1.0 - night);
 	}
 
-	// Stars, fading in as the sun drops.
-	if (night > 0.01 && up > -0.03) {
+	// Stars, fading in as the sun drops. Deliberately skipped in the cubemap
+	// pass: they carry no useful light, but a 128px radiance map full of white
+	// specks turns every glossy surface in the city into a field of crawling
+	// dots -- which is exactly what the night windows were reflecting.
+	if (night > 0.01 && up > -0.03 && !AT_CUBEMAP_PASS) {
 		vec3 sp = normalize(EYEDIR) * 210.0;
 		float r = hash31(floor(sp));
 		float s = step(star_density, r);

@@ -482,6 +482,11 @@ func set_yaw(radians: float) -> void:
 	rotation.y = _yaw
 
 
+## Camera pitch, for framing a capture. Gameplay drives this from look input.
+func set_pitch(radians: float) -> void:
+	_pitch = clampf(radians, -MAX_PITCH, MAX_PITCH)
+
+
 func teleport(pos: Vector3, face_yaw: float = 0.0) -> void:
 	global_position = pos
 	velocity = Vector3.ZERO

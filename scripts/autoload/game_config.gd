@@ -96,6 +96,10 @@ func _register_shader_globals() -> void:
 	_global_float("redline_night", 0.0)
 	_global_float("redline_wind", 0.25)
 	_global_float("redline_wetness", 0.0)
+	# How built-up the player's surroundings are, already multiplied by
+	# night_factor. Shaders use it for light pollution: a city facade at
+	# midnight is never as black as a hillside at midnight.
+	_global_float("redline_urban_night", 0.0)
 
 
 func _global_float(name: String, value: float) -> void:

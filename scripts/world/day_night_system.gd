@@ -53,7 +53,7 @@ func setup(mat: MaterialLib) -> void:
 
 	moon = DirectionalLight3D.new()
 	moon.name = "Moon"
-	moon.light_energy = 0.16
+	moon.light_energy = 0.24
 	moon.light_color = Color(0.6, 0.72, 1.0)
 	moon.shadow_enabled = false
 	add_child(moon)
@@ -194,7 +194,7 @@ func _update(_force: bool) -> void:
 	sun.light_color = noon.lerp(warm, dusk)
 	sun.light_energy = clampf(elev * 1.35 + 0.06, 0.0, 1.15) * (1.0 - _storm_blend * 0.6)
 	sun.visible = sun.light_energy > 0.005
-	moon.light_energy = 0.18 * night_factor
+	moon.light_energy = 0.26 * night_factor
 	moon.visible = moon.light_energy > 0.005
 
 	if environment != null:
@@ -206,18 +206,36 @@ func _update(_force: bool) -> void:
 		environment.fog_density = lerpf(0.0010, 0.0042, _storm_blend) * (1.0 + night_factor * 0.4)
 		# Light pollution: a built-up area never goes as dark as open country,
 		# and without this the facades between the windows are pure black.
-		var night_floor: float = lerpf(0.16, 0.42, _urban)
+		#
+		# Ambient is a blend of the sky radiance map and the explicit colour,
+		# weighted by ambient_light_sky_contribution, so at 0.85 only ~15% of
+		# the floor below reaches a wall. Do NOT lower that weight to
+		# compensate: with BG_SKY the reduced contribution leaks the ambient
+		# colour into the sky background as a flat wash (measured -- the night
+		# sky went from RGB 4,0,0 to 128,91,49 on the same frame). Raising the
+		# energy instead leaves the background alone, which is why the night
+		# figures here look large.
+		var night_floor: float = lerpf(0.52, 1.05, _urban)
 		environment.ambient_light_energy = lerpf(0.62, night_floor, night_factor)
 		environment.ambient_light_color = Color(0.55, 0.62, 0.78).lerp(
-			Color(0.95, 0.80, 0.62), _urban * night_factor)
+			Color(0.42, 0.48, 0.66), night_factor).lerp(
+			Color(0.95, 0.72, 0.46), _urban * night_factor)
+		# Ground mist belongs in the valleys and between the trees. Left at
+		# full strength over a built-up area it sat at eye level down every
+		# street and turned the city into milk, so it thins out as the
+		# surroundings get more urban.
 		environment.fog_height_density = lerpf(0.05, 0.16, _storm_blend) \
-			* lerpf(1.0, 2.1, night_factor)
+			* lerpf(1.0, 2.1, night_factor) * lerpf(1.0, 0.16, _urban)
 		environment.fog_height = lerpf(7.0, 2.5, _storm_blend)
+		environment.fog_depth_begin = lerpf(60.0, 170.0, _urban)
 		environment.adjustment_saturation = lerpf(1.12, 0.95, night_factor)
 		environment.adjustment_contrast = lerpf(1.14, 1.08, night_factor)
 		environment.glow_intensity = lerpf(0.38, 0.62, night_factor) if _glow else 0.0
 
 	GameConfig.set_shader_global("redline_night", night_factor)
+	# Ambient cannot carry the urban night lift on its own without washing the
+	# sky (see the note above), so the facades and streets take it from here.
+	GameConfig.set_shader_global("redline_urban_night", _urban * night_factor)
 	time_changed.emit(hours)
 
 

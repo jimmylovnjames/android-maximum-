@@ -138,13 +138,19 @@ func _build_light_pool() -> void:
 		var l := OmniLight3D.new()
 		l.name = "CityLight%d" % i
 		l.light_color = Color(1.0, 0.82, 0.56)
-		l.omni_range = 17.0
+		l.omni_range = 24.0
+		l.omni_attenuation = 1.4
 		l.light_energy = 0.0
 		l.shadow_enabled = false
 		l.visible = false
+		# Fading at 60 m meant the city had no ground-level glow from anywhere
+		# you would actually look at it from -- the skyline was windows over a
+		# black void. These are the cheapest lights in the scene (no shadow,
+		# small range), so carrying them out to the edge of the street grid is
+		# affordable and it is what gives the city a lit floor.
 		l.distance_fade_enabled = true
-		l.distance_fade_begin = 60.0
-		l.distance_fade_length = 22.0
+		l.distance_fade_begin = 170.0
+		l.distance_fade_length = 70.0
 		add_child(l)
 		_light_pool.append(l)
 
@@ -278,13 +284,17 @@ func _refresh_lights(pp: Vector3) -> void:
 
 	var candidates: Array[Vector3] = []
 	var fc: Vector2i = ChunkStreamer.world_to_coord(pp)
-	for dz in range(-2, 3):
-		for dx in range(-2, 3):
+	# Radius 3 and a 240 m cut-off: a large budget on a dense night needs more
+	# spots to choose from than a 2-chunk ring holds, or most of the pool sits
+	# idle while the street two blocks over stays dark.
+	const LIGHT_REACH_SQ: float = 57600.0
+	for dz in range(-3, 4):
+		for dx in range(-3, 4):
 			var d: ChunkData = streamer.get_chunk_data(fc + Vector2i(dx, dz))
 			if d == null:
 				continue
 			for p: Vector3 in d.light_spots:
-				if p.distance_squared_to(pp) < 22500.0:
+				if p.distance_squared_to(pp) < LIGHT_REACH_SQ:
 					candidates.append(p)
 			if candidates.size() >= _light_budget * 3:
 				break
@@ -387,7 +397,15 @@ func bench_prepare(seed_value: int) -> void:
 
 func bench_teleport(radius: float) -> void:
 	var ang: float = 0.6
-	teleport_player(Vector3(cos(ang) * radius, 0.0, sin(ang) * radius))
+	var p := Vector3(cos(ang) * radius, 0.0, sin(ang) * radius)
+	# Land on the carriageway once there is one. City blocks are close to
+	# contiguous, so an arbitrary point at a given radius usually lands inside
+	# a building shell -- which makes a benchmark run measure the inside of a
+	# box and makes a capture look like a bug.
+	if world_gen != null and world_gen.urban_factor(p.x, p.z) > 0.2:
+		var road: Vector3 = world_gen.nearest_road_point(p.x, p.z)
+		p = Vector3(road.x, 0.0, road.z)
+	teleport_player(p)
 
 
 func bench_set_weather(state: int) -> void:

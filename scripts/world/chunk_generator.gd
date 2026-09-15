@@ -8,7 +8,7 @@ const LOD_STEPS: PackedInt32Array = [1, 2, 4, 8]
 const SKIRT_DEPTH: float = 7.0
 const BLOCK_CELL: float = 16.0
 const FLOOR_HEIGHT: float = 3.4
-const MAX_MODULES_PER_CHUNK: int = 520
+const MAX_MODULES_PER_CHUNK: int = 900
 const PERM_PRIME: int = 104729
 ## Sign palette. Deliberately narrow and saturated so a night skyline reads as
 ## a city rather than a colour-noise field.
@@ -447,8 +447,16 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 				continue
 			if WorldGen.hash_f(int(cx), int(cz), 41) > chance:
 				continue
-			var w: float = WorldGen.hash_range(int(cx), int(cz), 42, 6.0, BLOCK_CELL - 4.0)
-			var dp: float = WorldGen.hash_range(int(cx), int(cz), 43, 6.0, BLOCK_CELL - 4.0)
+			# Footprints grow towards the cell edge as the area gets more
+			# built-up. At a flat 6..12 m in a 16 m cell every building stood
+			# alone in its own yard and the "dense city" read as a business
+			# park; a real block is close to contiguous, with the gaps only
+			# where the streets are.
+			var u_here: float = gen.urban_factor(cx, cz)
+			var foot_min: float = lerpf(6.0, 11.0, u_here)
+			var foot_max: float = lerpf(BLOCK_CELL - 4.0, BLOCK_CELL - 1.4, u_here)
+			var w: float = WorldGen.hash_range(int(cx), int(cz), 42, foot_min, foot_max)
+			var dp: float = WorldGen.hash_range(int(cx), int(cz), 43, foot_min, foot_max)
 			# Reject footprints that would sit on the carriageway.
 			if (gen.on_road(cx - w * 0.5, cz) or gen.on_road(cx + w * 0.5, cz)
 					or gen.on_road(cx, cz - dp * 0.5) or gen.on_road(cx, cz + dp * 0.5)):
@@ -510,11 +518,12 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 					var half_extent: float = (dp if face % 2 == 0 else w) * 0.5
 					var out_w: float = half_extent * podium_scale + 0.28
 					var off := Vector3(sin(yaw_s) * out_w, 0.0, cos(yaw_s) * out_w)
-					# Signage lives on the lower floors, which is both where it
-					# belongs and where the podium scale is the right one to use.
-					var sy: float = base_y + FLOOR_HEIGHT * (
-						1.2 + WorldGen.hash_range(int(cx) + si, int(cz), 60,
-							0.0, float(clampi(maxi(podium, 2), 2, 4))))
+					# Street level, roughly 3 to 9 m up. High signage reads as
+					# texture on a distant skyline; signage the player walks
+					# past is what makes a street feel occupied.
+					var sy: float = base_y + WorldGen.hash_range(
+						int(cx) + si, int(cz), 60, 3.0,
+						minf(9.0, float(floors) * FLOOR_HEIGHT - 1.5))
 					var neon: Color = NEON_COLORS[
 						WorldGen.hash_i(int(cx) + si * 7, int(cz), 61) % NEON_COLORS.size()]
 					signs.add_simple(

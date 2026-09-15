@@ -11,6 +11,7 @@ const SH_BUILDING := "res://shaders/building.gdshader"
 const SH_WATER := "res://shaders/water.gdshader"
 const SH_SKY := "res://shaders/sky.gdshader"
 const SH_PROP := "res://shaders/prop_instanced.gdshader"
+const SH_NEON := "res://shaders/neon.gdshader"
 
 var terrain: ShaderMaterial
 var grass: ShaderMaterial
@@ -19,6 +20,7 @@ var canopy: ShaderMaterial
 var impostor_conifer: ShaderMaterial
 var impostor_broadleaf: ShaderMaterial
 var impostor_birch: ShaderMaterial
+var neon: ShaderMaterial
 var building: ShaderMaterial
 var water: ShaderMaterial
 var prop: ShaderMaterial
@@ -161,6 +163,8 @@ func rebuild(preset: int) -> void:
 	canopy.set_shader_parameter("stiffness", 0.75)
 	canopy.set_shader_parameter("translucency", 0.28)
 	canopy.set_shader_parameter("use_mask", false)
+
+	neon = _shader_mat(SH_NEON, neon)
 
 	impostor_conifer = _impostor_mat(impostor_conifer, imp_conifer)
 	impostor_broadleaf = _impostor_mat(impostor_broadleaf, imp_broad)

@@ -25,7 +25,11 @@ uniform float detail_strength = 0.36;
 uniform float normal_strength = 0.85;
 uniform float macro_variation = 0.42;
 
+uniform float sky_glow_energy = 0.30;
+uniform vec3 sky_glow_color : source_color = vec3(1.0, 0.68, 0.42);
+
 global uniform float redline_wetness;
+global uniform float redline_urban_night;
 
 varying vec3 v_world;
 varying float v_slope;
@@ -92,6 +96,10 @@ void fragment() {
 	base *= mix(1.0, 0.78, clamp(v_slope * 1.4, 0.0, 1.0));
 
 	ALBEDO = base;
+	// Matching light-pollution fill to the one on the facades, so the street
+	// surface between the streetlight pools is dim rather than black.
+	EMISSION = sky_glow_color * base * sky_glow_energy
+		* clamp(redline_urban_night, 0.0, 1.0);
 	// Ground within the tide band stays wet whatever the weather.
 	float shore_wet = max(wet, clamp(band * 1.2, 0.0, 1.0));
 	ROUGHNESS = mix(roughness_base, 0.22, shore_wet * 0.85) * mix(1.0, 0.82, rock_mask)

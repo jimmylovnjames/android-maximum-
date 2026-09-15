@@ -241,6 +241,13 @@ func terrain_color_u(x: float, z: float, h: float, u: float) -> Color:
 
 	# REDLINE zones are scorched.
 	c = c.lerp(Color(0.15, 0.08, 0.07), rl * 0.75)
+
+	# Alpha carries how paved the ground is; the terrain shader reads it as
+	# `organic = 1.0 - COLOR.a` to decide how much soil detail, macro variation
+	# and normal depth to apply. Leaving it at the default 1.0 -- as it was --
+	# told the shader every square metre of the world was concrete, which is
+	# why open country looked as flat and lifeless as a car park.
+	c.a = clampf(u * 0.85 + (0.6 if (on_road(x, z) and u > 0.15) else 0.0), 0.0, 1.0)
 	return c
 
 
@@ -288,8 +295,14 @@ func grass_density_at(x: float, z: float, h: float, s: float) -> float:
 	if h < GameConfig.WATER_LEVEL + 0.3:
 		return 0.0
 	var u: float = urban_factor(x, z)
+	# Nothing grows on the carriageway, and a dense block leaves only the
+	# cracks. A linear 1 - u * 0.9 still left tufts down the middle of a city
+	# street, which read as a bug rather than as neglect.
+	if on_road(x, z):
+		return 0.0
 	var m: float = moisture(x, z)
-	return clampf((0.35 + m * 0.8) * (1.0 - u * 0.9) * (1.0 - s * 1.4), 0.0, 1.4)
+	var open: float = pow(1.0 - clampf(u, 0.0, 1.0), 2.4)
+	return clampf((0.35 + m * 0.8) * open * (1.0 - s * 1.4), 0.0, 1.4)
 
 
 ## Probability that a given block cell holds a building.

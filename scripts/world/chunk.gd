@@ -31,6 +31,12 @@ const CATEGORY_RANGE_MAX: Dictionary = {
 	"building": 4000.0,
 }
 const TERRAIN_LOD_RANGES: PackedFloat32Array = [96.0, 240.0, 520.0, 1400.0]
+## Meshes whose own surface materials must survive: rocks use the plain prop
+## material at a different tint, and signage carries an emissive face that a
+## batch-wide override would wipe out.
+const SELF_MATERIALED: PackedStringArray = [
+	"rock_l0", "rock_l1", "boulder", "outcrop0", "outcrop1", "sign", "hoarding",
+]
 
 var data: ChunkData = null
 var coord: Vector2i = Vector2i.ZERO
@@ -136,7 +142,10 @@ func _build_batch(key: String) -> void:
 	if batch.category == "building":
 		mmi.material_override = _mat_lib.building_variant(batch.material_variant)
 	elif batch.category == "prop" or batch.category == "detail":
-		if not batch.meshes[0].begins_with("rock") and batch.meshes[0] != "boulder":
+		# A material_override replaces every surface on the mesh, so meshes that
+		# carry their own materials on purpose -- rock variants, and anything
+		# with a lit face -- have to be left alone.
+		if not (batch.meshes[0] in SELF_MATERIALED):
 			mmi.material_override = _mat_lib.prop_variant(batch.material_variant)
 
 	add_child(mmi)

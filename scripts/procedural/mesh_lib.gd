@@ -388,22 +388,34 @@ func _build_urban() -> void:
 			rng.randf_range(0.3, 0.9)), Color(0.34, 0.33, 0.32))
 	meshes["rubble"] = rubble.commit(null, _mat.prop)
 
-	# Facade sign: a lit panel in a dark frame, facing +Z so the instance yaw
-	# decides which wall it hangs on.
+	# Facade sign: a lit panel in a dark frame. The instance is placed standing
+	# off the wall along its own +Z, so every lit surface here has to sit at
+	# POSITIVE z, proud of the frame. Putting the panel behind the frame -- at
+	# negative z, where it started -- pushes it into the brickwork and the sign
+	# renders as an unlit black slab from the street.
 	var sign := MeshBuilder.new()
-	sign.add_box(Vector3(-1.6, -0.75, -0.10), Vector3(3.2, 1.5, 0.14),
-		Color(0.10, 0.10, 0.12))
-	sign.add_box(Vector3(-1.42, -0.58, -0.16), Vector3(2.84, 1.16, 0.08), Color.WHITE)
-	meshes["sign"] = sign.commit(null, _mat.prop)
+	sign.add_box(Vector3(-2.1, -0.95, -0.14), Vector3(4.2, 1.9, 0.18),
+		Color(0.09, 0.09, 0.11))
+	sign.add_box(Vector3(-1.88, -0.74, 0.03), Vector3(3.76, 1.48, 0.12), Color.WHITE)
+	# Blade sign projecting out from the wall, hung below the panel. It starts
+	# at the wall face and reaches outwards rather than straddling it.
+	sign.add_box(Vector3(-0.17, -2.7, 0.02), Vector3(0.34, 1.7, 1.15),
+		Color(0.09, 0.09, 0.11))
+	sign.add_box(Vector3(-0.09, -2.55, 0.12), Vector3(0.18, 1.4, 0.95), Color.WHITE)
+	meshes["sign"] = sign.commit(null, _mat.neon)
 
-	# Rooftop hoarding: taller, on a visible gantry.
+	# Rooftop hoarding: taller, on a visible gantry. Lit face on +Z for the
+	# same reason as the facade sign; the back stays a dark board.
 	var hoarding := MeshBuilder.new()
 	hoarding.add_box(Vector3(-0.12, 0.0, -0.12), Vector3(0.24, 2.2, 0.24),
 		Color(0.16, 0.16, 0.18))
-	hoarding.add_box(Vector3(-3.0, 2.0, -0.12), Vector3(6.0, 2.6, 0.22),
+	hoarding.add_box(Vector3(-3.0, 2.0, -0.16), Vector3(6.0, 2.6, 0.24),
 		Color(0.10, 0.10, 0.12))
-	hoarding.add_box(Vector3(-2.8, 2.2, -0.20), Vector3(5.6, 2.2, 0.1), Color.WHITE)
-	meshes["hoarding"] = hoarding.commit(null, _mat.prop)
+	var hoarding_frame: ArrayMesh = hoarding.commit(null, _mat.prop)
+	var hoarding_face := MeshBuilder.new()
+	hoarding_face.add_box(Vector3(-2.8, 2.2, 0.06), Vector3(5.6, 2.2, 0.12), Color.WHITE)
+	hoarding_face.commit(hoarding_frame, _mat.neon)
+	meshes["hoarding"] = hoarding_frame
 
 	# Street furniture that reads at ground level.
 	var bollard := MeshBuilder.new()

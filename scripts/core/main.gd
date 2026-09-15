@@ -36,13 +36,17 @@ var _start_radius: float = -1.0
 var _force_quality: int = -1
 var _start_time: float = -1.0
 var _selftest: bool = false
+var _do_probe: bool = false
+var _probe_chunk: Vector2i = Vector2i.ZERO
 var _mesh_gallery: bool = false
 var _gallery_filter: String = ""
 var _godmode: bool = false
 var _show_menu: bool = false
 var _safety_off: bool = false
 var _no_hostiles: bool = false
+var _no_ui: bool = false
 var _start_look_deg: float = NAN
+var _start_pitch_deg: float = NAN
 
 
 func _ready() -> void:
@@ -100,6 +104,10 @@ func _ready() -> void:
 	EventBus.benchmark_aborted.connect(_on_benchmark_aborted)
 	get_tree().auto_accept_quit = true
 
+	if _do_probe:
+		call_deferred("_run_chunk_probe")
+		return
+
 	if _selftest:
 		call_deferred("_run_selftest")
 		return
@@ -145,6 +153,44 @@ func _build_postfx() -> void:
 	mat.shader = shader
 	rect.material = mat
 	postfx_layer.add_child(rect)
+
+
+## Generates one chunk and prints what came out of it, batch by batch. The
+## fastest way to answer "is this thing actually being placed" without reading
+## it off a dark screenshot.
+func _run_chunk_probe() -> void:
+	MaterialLib.refresh_for_preset(AdaptiveQualityManager.preset)
+	MeshLib.reset()
+	MeshLib.get_instance()
+	var gen := WorldGen.new(GameConfig.world_seed)
+	var d: ChunkData = ChunkGenerator.generate(gen, _probe_chunk, {
+		"veg_step": 1.0, "collision": false, "lod_count": 2, "prop_richness": 1.0,
+	})
+	var out: Dictionary = {
+		"coord": [_probe_chunk.x, _probe_chunk.y],
+		"centre": [d.center.x, d.center.z],
+		"zone": GameConfig.ZONE_NAMES[clampi(d.zone, 0, 6)],
+		"urban_factor": gen.urban_factor(d.center.x, d.center.z),
+		"height_min": d.height_min, "height_max": d.height_max,
+		"gen_msec": d.gen_msec,
+		"estimated_kb": d.estimated_bytes() / 1024,
+		"spawns": {
+			"npc": d.npc_spawns.size(), "enemy": d.enemy_spawns.size(),
+			"vehicle": d.vehicle_spawns.size(), "lights": d.light_spots.size(),
+			"pickups": d.pickups.size(),
+		},
+	}
+	var batches: Dictionary = {}
+	for key: String in d.batches.keys():
+		var b: InstanceBatch = d.batches[key]
+		if b.count > 0:
+			batches[key] = {"count": b.count, "category": b.category,
+				"mesh": b.meshes[0]}
+	out["batches"] = batches
+	print("REDLINE_PROBE_BEGIN")
+	print(JSON.stringify(out, "  "))
+	print("REDLINE_PROBE_END")
+	get_tree().quit(0)
 
 
 ## Static geometry/determinism/safety checks. No world, no display.
@@ -196,6 +242,11 @@ func _parse_cli() -> void:
 			_start_time = float(arg.split("=")[1])
 		elif arg == "--selftest":
 			_selftest = true
+		elif arg.begins_with("--probe-chunk="):
+			var parts: PackedStringArray = arg.split("=", true, 1)[1].split(",")
+			if parts.size() >= 2:
+				_probe_chunk = Vector2i(int(parts[0]), int(parts[1]))
+				_do_probe = true
 		elif arg == "--mesh-gallery":
 			_mesh_gallery = true
 		elif arg.begins_with("--gallery-filter="):
@@ -211,6 +262,12 @@ func _parse_cli() -> void:
 			_no_hostiles = true
 		elif arg.begins_with("--look="):
 			_start_look_deg = float(arg.split("=")[1])
+		elif arg.begins_with("--pitch="):
+			_start_pitch_deg = float(arg.split("=")[1])
+		elif arg == "--no-ui":
+			# Development only: hides the whole interface so a capture shows the
+			# world alone. --hud= only controls the performance overlay.
+			_no_ui = true
 		elif arg == "--safety-off":
 			# Development only, for capturing the interface under a software
 			# renderer where the low-FPS watchdog would otherwise fire
@@ -226,7 +283,10 @@ func _start_game() -> void:
 		return
 	_started = true
 	main_menu.visible = false
-	game_hud.visible = true
+	game_hud.visible = not _no_ui
+	if _no_ui:
+		perf_hud.set_mode(PerfHUD.Mode.OFF)
+		touch.visible = false
 
 	world = WorldManager.new()
 	world.name = "World"
@@ -249,6 +309,8 @@ func _start_game() -> void:
 		world.npcs.hostiles_enabled = false
 	if not is_nan(_start_look_deg) and world.player != null:
 		world.player.set_yaw(deg_to_rad(_start_look_deg))
+	if not is_nan(_start_pitch_deg) and world.player != null:
+		world.player.set_pitch(deg_to_rad(_start_pitch_deg))
 
 	GameState.reset_run()
 	GameState.set_phase(GameState.Phase.PLAYING)
