@@ -19,11 +19,16 @@ global uniform float redline_wetness;
 varying vec3 v_world;
 varying float v_emis;
 varying float v_rough;
+varying float v_self_lit;
 
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_emis = INSTANCE_CUSTOM.y;
 	v_rough = INSTANCE_CUSTOM.z;
+	// w flags an instance that glows in its own colour rather than the batch
+	// tint: that is what makes a street of signs read as a street of signs
+	// instead of one repeated orange.
+	v_self_lit = INSTANCE_CUSTOM.a;
 }
 
 void fragment() {
@@ -35,5 +40,11 @@ void fragment() {
 		* mix(1.0, 0.62, wet);
 	METALLIC = base_metallic;
 	float night_boost = mix(0.25, 1.0, clamp(redline_night, 0.0, 1.0));
-	EMISSION = emission_tint.rgb * v_emis * emission_energy * night_boost;
+	vec3 glow_tint = mix(emission_tint.rgb, COLOR.rgb, step(0.5, v_self_lit));
+	// Self-lit panels stay bright in daylight too -- a neon sign does not
+	// switch off at noon, it just stops dominating.
+	float boost = mix(night_boost, mix(0.55, 1.0, clamp(redline_night, 0.0, 1.0)),
+		step(0.5, v_self_lit));
+	EMISSION = glow_tint * v_emis * emission_energy * boost;
+	ALBEDO = mix(ALBEDO, base * 0.35, step(0.5, v_self_lit));
 }

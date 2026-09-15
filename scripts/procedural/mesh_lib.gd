@@ -167,6 +167,32 @@ func _build_trees() -> void:
 			Color(0.27, 0.23, 0.2), false, false)
 	meshes["dead_tree"] = dead.commit(null, _mat.bark)
 
+	# --- Distant impostors ---------------------------------------------------
+	# Two crossed cards wearing a generated silhouette. Four triangles each, so
+	# the outer half of the tree draw distance costs almost nothing, and the
+	# upward normal makes them take the same light as the canopies they replace.
+	var impostors: Array = [
+		# Card dimensions match the close-range mesh they stand in for: the
+		# conifer is 5.7 m across and 10.4 m tall at LOD0, the broadleaf is a
+		# squat 7.2 m crown, the birch is a narrow 3.6 m.
+		# Colours are roughly 55% of the close-range canopy's. An upward normal
+		# is what keeps a billboard from flickering as the camera turns, but it
+		# also means the card takes the full overhead light term where a real
+		# canopy is largely self-shaded, so the tone has to come down to match.
+		["pine_l3", 6.2, 10.4, Color(0.10, 0.19, 0.10), Color(0.17, 0.28, 0.14),
+			_mat.impostor_conifer],
+		["broad_l3", 7.2, 7.8, Color(0.12, 0.21, 0.11), Color(0.19, 0.31, 0.14),
+			_mat.impostor_broadleaf],
+		["birch_l2", 3.6, 7.6, Color(0.19, 0.26, 0.14), Color(0.27, 0.34, 0.17),
+			_mat.impostor_birch],
+	]
+	for spec: Array in impostors:
+		var card := MeshBuilder.new()
+		card.add_cross_card(Vector3.ZERO, float(spec[1]), float(spec[2]),
+			spec[3], spec[4], 0.0, Vector3(0.0, 1.0, 0.0))
+		meshes[String(spec[0])] = card.commit(null, spec[5])
+		open_meshes.append(String(spec[0]))
+
 	# --- Forest floor debris ------------------------------------------------
 	var log_mesh := MeshBuilder.new()
 	var lxf := Transform3D(Basis(Vector3(0, 0, 1), PI * 0.5), Vector3(0.0, 0.42, 0.0))
@@ -243,6 +269,32 @@ func _build_rocks() -> void:
 		b.add_blob(Vector3(0.0, 0.62, 0.0), Vector3(1.0, 0.66, 0.95),
 			2 - lod, Color(0.34, 0.33, 0.31), rng, 0.38)
 		meshes["rock_l%d" % lod] = b.commit(null, _mat.prop)
+	# Outcrops: stacked, tilted slabs rather than one smooth lump. These go on
+	# steep ground, where the terrain is otherwise a featureless slope, and
+	# they are the main thing breaking up a horizon of rounded hills.
+	for variant in 2:
+		var out := MeshBuilder.new()
+		var orng := RandomNumberGenerator.new()
+		orng.seed = 6100 + variant
+		var slabs: int = 5 + variant * 2
+		var height: float = 0.0
+		for i in slabs:
+			var t: float = float(i) / float(slabs)
+			var w: float = (3.4 - t * 2.1) * (0.85 + orng.randf() * 0.3)
+			var dp: float = (3.0 - t * 1.8) * (0.85 + orng.randf() * 0.3)
+			var th: float = orng.randf_range(0.55, 1.15) * (1.0 - t * 0.35)
+			var xf := Transform3D(
+				Basis(Vector3(0, 1, 0), orng.randf() * TAU)
+					* Basis(Vector3(0, 0, 1), orng.randf_range(-0.16, 0.16))
+					* Basis(Vector3(1, 0, 0), orng.randf_range(-0.14, 0.14)),
+				Vector3(orng.randf_range(-0.5, 0.5), height + th * 0.5,
+					orng.randf_range(-0.5, 0.5)))
+			var grey: float = orng.randf_range(0.28, 0.42)
+			out.add_box_xform(xf, Vector3(w, th, dp),
+				Color(grey * 1.04, grey, grey * 0.94))
+			height += th * orng.randf_range(0.72, 0.95)
+		meshes["outcrop%d" % variant] = out.commit(null, _mat.prop)
+
 	var boulder := MeshBuilder.new()
 	var rng2 := RandomNumberGenerator.new()
 	rng2.seed = 991
@@ -335,6 +387,30 @@ func _build_urban() -> void:
 		rubble.add_box_xform(xf, Vector3(rng.randf_range(0.3, 0.9), rng.randf_range(0.2, 0.5),
 			rng.randf_range(0.3, 0.9)), Color(0.34, 0.33, 0.32))
 	meshes["rubble"] = rubble.commit(null, _mat.prop)
+
+	# Facade sign: a lit panel in a dark frame, facing +Z so the instance yaw
+	# decides which wall it hangs on.
+	var sign := MeshBuilder.new()
+	sign.add_box(Vector3(-1.6, -0.75, -0.10), Vector3(3.2, 1.5, 0.14),
+		Color(0.10, 0.10, 0.12))
+	sign.add_box(Vector3(-1.42, -0.58, -0.16), Vector3(2.84, 1.16, 0.08), Color.WHITE)
+	meshes["sign"] = sign.commit(null, _mat.prop)
+
+	# Rooftop hoarding: taller, on a visible gantry.
+	var hoarding := MeshBuilder.new()
+	hoarding.add_box(Vector3(-0.12, 0.0, -0.12), Vector3(0.24, 2.2, 0.24),
+		Color(0.16, 0.16, 0.18))
+	hoarding.add_box(Vector3(-3.0, 2.0, -0.12), Vector3(6.0, 2.6, 0.22),
+		Color(0.10, 0.10, 0.12))
+	hoarding.add_box(Vector3(-2.8, 2.2, -0.20), Vector3(5.6, 2.2, 0.1), Color.WHITE)
+	meshes["hoarding"] = hoarding.commit(null, _mat.prop)
+
+	# Street furniture that reads at ground level.
+	var bollard := MeshBuilder.new()
+	bollard.add_cylinder(Vector3.ZERO, 0.95, 0.11, 0.09, 6, Color(0.30, 0.31, 0.33), true)
+	bollard.add_cylinder(Vector3(0.0, 0.8, 0.0), 0.06, 0.13, 0.13, 6,
+		Color(0.85, 0.72, 0.25), true)
+	meshes["bollard"] = bollard.commit(null, _mat.prop)
 
 	var road_mark := MeshBuilder.new()
 	road_mark.add_box(Vector3(-1.5, 0.0, -0.14), Vector3(3.0, 0.03, 0.28),

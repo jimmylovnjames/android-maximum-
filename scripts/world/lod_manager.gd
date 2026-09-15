@@ -16,6 +16,9 @@ var lod_bias: float = 1.0
 var view_distance: float = 800.0
 var tree_lod1_distance: float = 95.0
 var tree_lod2_distance: float = 210.0
+## Beyond this the tree becomes a crossed billboard. Set well inside the tree
+## draw distance so the swap happens where the silhouette is all that reads.
+var tree_lod3_distance: float = 400.0
 var rock_lod1_distance: float = 70.0
 var grass_lod1_distance: float = 26.0
 
@@ -77,7 +80,9 @@ func _update_chunk(chunk: WorldChunk, fp: Vector3) -> void:
 	var d: float = Vector2(center.x - fp.x, center.z - fp.z).length()
 
 	var tree_lod: int = 0
-	if d > tree_lod2_distance * lod_bias:
+	if d > tree_lod3_distance * lod_bias:
+		tree_lod = 3
+	elif d > tree_lod2_distance * lod_bias:
 		tree_lod = 2
 	elif d > tree_lod1_distance * lod_bias:
 		tree_lod = 1

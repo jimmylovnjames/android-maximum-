@@ -23,16 +23,20 @@ const ZONE_NAMES: PackedStringArray = [
 const ZONE_RADII: PackedFloat32Array = [250.0, 600.0, 1000.0, 1500.0, 2100.0, 2800.0]
 
 # --- Hard safety caps (never exceeded regardless of stress level) ------------
-const MAX_NPCS: int = 1400
-const MAX_FULL_NPCS: int = 120
-const MAX_REDUCED_NPCS: int = 420
-const MAX_VEHICLES: int = 220
-const MAX_RIGID_BODIES: int = 900
-const MAX_DEBRIS: int = 600
+const MAX_NPCS: int = 2200
+const MAX_FULL_NPCS: int = 160
+const MAX_REDUCED_NPCS: int = 620
+const MAX_VEHICLES: int = 320
+const MAX_RIGID_BODIES: int = 1200
+const MAX_DEBRIS: int = 800
 const MAX_OMNI_LIGHTS: int = 96
 const MAX_PARTICLE_SYSTEMS: int = 64
-const MAX_STREAM_RADIUS: int = 9
-const MAX_CACHE_MB: int = 2048
+const MAX_STREAM_RADIUS: int = 12
+## Ceiling on retained world data. Android will not hand a process anything
+## like the device's full RAM, but a native app on a 12 GB+ phone can hold
+## several gigabytes of real geometry; the auto-detected budget below is what
+## actually applies on any given device.
+const MAX_CACHE_MB: int = 6144
 const MAX_PROJECTILES: int = 256
 const MAX_EXPLOSION_BODIES: int = 160
 

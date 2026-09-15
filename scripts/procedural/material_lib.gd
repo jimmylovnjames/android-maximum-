@@ -16,6 +16,9 @@ var terrain: ShaderMaterial
 var grass: ShaderMaterial
 var foliage: ShaderMaterial
 var canopy: ShaderMaterial
+var impostor_conifer: ShaderMaterial
+var impostor_broadleaf: ShaderMaterial
+var impostor_birch: ShaderMaterial
 var building: ShaderMaterial
 var water: ShaderMaterial
 var prop: ShaderMaterial
@@ -113,6 +116,12 @@ func rebuild(preset: int) -> void:
 		_count_tex(w, size)
 		_count_tex(s, size)
 
+	var imp_size: int = clampi(size / 2, 64, 256)
+	var imp_conifer: ImageTexture = TextureLib.tree_impostor_mask(0, imp_size, seed_base + 21)
+	var imp_broad: ImageTexture = TextureLib.tree_impostor_mask(1, imp_size, seed_base + 22)
+	var imp_birch: ImageTexture = TextureLib.tree_impostor_mask(2, imp_size, seed_base + 23)
+	_tex_bytes += imp_size * imp_size * 4 * 3
+
 	var grass_mask: ImageTexture = TextureLib.grass_blade_mask(64, 128, seed_base + 7)
 	var leaf_mask: ImageTexture = TextureLib.leaf_cluster_mask(128, seed_base + 8)
 	_tex_bytes += 64 * 128 * 4 + 128 * 128 * 4
@@ -122,6 +131,7 @@ func rebuild(preset: int) -> void:
 	terrain.set_shader_parameter("detail_tex", detail)
 	terrain.set_shader_parameter("macro_tex", macro)
 	terrain.set_shader_parameter("detail_normal", ground_n)
+	terrain.set_shader_parameter("foam_noise", detail)
 	terrain.set_shader_parameter("water_level", GameConfig.WATER_LEVEL)
 	terrain.set_shader_parameter("normal_strength", 0.5)
 
@@ -151,6 +161,10 @@ func rebuild(preset: int) -> void:
 	canopy.set_shader_parameter("stiffness", 0.75)
 	canopy.set_shader_parameter("translucency", 0.28)
 	canopy.set_shader_parameter("use_mask", false)
+
+	impostor_conifer = _impostor_mat(impostor_conifer, imp_conifer)
+	impostor_broadleaf = _impostor_mat(impostor_broadleaf, imp_broad)
+	impostor_birch = _impostor_mat(impostor_birch, imp_birch)
 
 	# --- Buildings / props ---------------------------------------------------
 	building = _shader_mat(SH_BUILDING, building)
@@ -225,6 +239,20 @@ func prop_variant(i: int) -> ShaderMaterial:
 	if prop_mats.is_empty():
 		return prop
 	return prop_mats[absi(i) % prop_mats.size()]
+
+
+## Distant-tree billboards: almost no wind (they are hundreds of metres away),
+## a low alpha cut so the mipmapped silhouette survives, and no translucency.
+func _impostor_mat(existing: ShaderMaterial, mask: Texture2D) -> ShaderMaterial:
+	var m: ShaderMaterial = _shader_mat(SH_VEGETATION, existing)
+	m.set_shader_parameter("leaf_mask", mask)
+	m.set_shader_parameter("use_mask", true)
+	m.set_shader_parameter("alpha_cut", 0.30)
+	m.set_shader_parameter("wind_strength", 0.06)
+	m.set_shader_parameter("wind_speed", 0.6)
+	m.set_shader_parameter("stiffness", 0.9)
+	m.set_shader_parameter("translucency", 0.12)
+	return m
 
 
 func _sync_variant_mats() -> void:

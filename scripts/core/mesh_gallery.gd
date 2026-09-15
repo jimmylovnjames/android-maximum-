@@ -10,6 +10,12 @@ extends Node3D
 const SPACING: float = 7.0
 const COLUMNS: int = 6
 
+## When set, only meshes whose key contains this substring are laid out. With
+## forty-odd meshes in the library the full grid is too small to judge; this is
+## how a single asset gets inspected at a useful size.
+var filter: String = ""
+var columns: int = COLUMNS
+
 
 func build() -> void:
 	var mat_lib: MaterialLib = MaterialLib.get_instance()
@@ -39,12 +45,19 @@ func build() -> void:
 	fill.rotation_degrees = Vector3(-18.0, 140.0, 0.0)
 	add_child(fill)
 
-	var keys: Array = lib.meshes.keys()
+	var keys: Array = []
+	for k: String in lib.meshes.keys():
+		if filter == "" or k.contains(filter):
+			keys.append(k)
 	keys.sort()
+	if keys.is_empty():
+		keys = lib.meshes.keys()
+		keys.sort()
+	columns = clampi(keys.size(), 1, COLUMNS)
 	var ground := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(COLUMNS * SPACING + 20.0,
-		ceil(float(keys.size()) / float(COLUMNS)) * SPACING + 20.0)
+	plane.size = Vector2(float(columns) * SPACING + 20.0,
+		ceil(float(keys.size()) / float(columns)) * SPACING + 20.0)
 	ground.mesh = plane
 	var gm := StandardMaterial3D.new()
 	gm.albedo_color = Color(0.22, 0.23, 0.25)
@@ -59,8 +72,8 @@ func build() -> void:
 		var mesh: Mesh = lib.meshes[key]
 		if mesh == null:
 			continue
-		var col: int = i % COLUMNS
-		var row: int = i / COLUMNS
+		var col: int = i % columns
+		var row: int = i / columns
 		var pos := Vector3(float(col) * SPACING, 0.0, float(row) * SPACING)
 
 		var mi := MeshInstance3D.new()
@@ -84,10 +97,10 @@ func build() -> void:
 		label.no_depth_test = true
 		add_child(label)
 
-	var rows: int = int(ceil(float(keys.size()) / float(COLUMNS)))
-	var cx: float = float(COLUMNS - 1) * SPACING * 0.5
+	var rows: int = int(ceil(float(keys.size()) / float(columns)))
+	var cx: float = float(columns - 1) * SPACING * 0.5
 	var cz: float = float(rows - 1) * SPACING * 0.5
-	var span: float = maxf(float(COLUMNS) * SPACING, float(rows) * SPACING)
+	var span: float = maxf(float(columns) * SPACING, float(rows) * SPACING)
 
 	var cam := Camera3D.new()
 	cam.far = 600.0

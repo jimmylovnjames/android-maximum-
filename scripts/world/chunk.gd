@@ -11,10 +11,24 @@ extends Node3D
 const CATEGORY_RANGE: Dictionary = {
 	"grass": 52.0,
 	"bush": 110.0,
-	"tree": 320.0,
-	"prop": 190.0,
+	# Trees reach much further than anything else because a forest that stops
+	# at 300 m leaves a bald horizon. The last LOD in the chain is a crossed
+	# billboard, so the far half of that range costs four triangles a tree.
+	"tree": 900.0,
+	"prop": 210.0,
 	"detail": 130.0,
-	"building": 1200.0,
+	"building": 1400.0,
+}
+## Hard ceilings, because lod_bias reaches 6.0 at MELTDOWN + INSANE. Without
+## these, grass would be drawn 300 m out (invisible, pure cost) and trees five
+## kilometres out, past the view distance that culls them anyway.
+const CATEGORY_RANGE_MAX: Dictionary = {
+	"grass": 130.0,
+	"bush": 260.0,
+	"tree": 2600.0,
+	"prop": 520.0,
+	"detail": 320.0,
+	"building": 4000.0,
 }
 const TERRAIN_LOD_RANGES: PackedFloat32Array = [96.0, 240.0, 520.0, 1400.0]
 
@@ -160,16 +174,20 @@ func apply_lod(lod_bias: float, view_distance: float, fade: bool) -> void:
 		var end2: float = base * lod_bias
 		if batch.category == "building":
 			end2 = maxf(base, view_distance)
+		end2 = minf(end2, float(CATEGORY_RANGE_MAX.get(batch.category, 600.0)))
+		# Nothing is worth drawing past the camera's far plane.
+		end2 = minf(end2, view_distance)
 		mmi.visibility_range_begin = 0.0
 		mmi.visibility_range_end = end2
-		# Ground cover always fades rather than popping: it is the category
-		# whose cull edge sits closest to the camera.
-		if batch.category == "grass":
-			mmi.visibility_range_end_margin = end2 * 0.22
+		# Ground cover and distant trees always fade rather than pop: their cull
+		# edges are the ones the player is most likely to be looking at.
+		if batch.category == "grass" or batch.category == "tree":
+			mmi.visibility_range_end_margin = end2 * 0.18
 			mmi.visibility_range_fade_mode = \
 				GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-		mmi.visibility_range_fade_mode = (
-			fade_mode as GeometryInstance3D.VisibilityRangeFadeMode)
+		else:
+			mmi.visibility_range_fade_mode = (
+				fade_mode as GeometryInstance3D.VisibilityRangeFadeMode)
 
 
 ## Swaps every batch of `category` onto the given LOD mesh index.

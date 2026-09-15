@@ -83,6 +83,78 @@ static func grass_blade_mask(size_x: int = 64, size_y: int = 128,
 	return ImageTexture.create_from_image(img)
 
 
+## Silhouette used by the furthest tree LOD. Two crossed cards wearing this
+## mask cost four triangles and read as a tree at a few hundred metres, which
+## is what lets the forest reach the horizon instead of stopping at 300 m.
+##
+## `kind`: 0 conifer, 1 broadleaf, 2 bare/birch.
+static func tree_impostor_mask(kind: int, size: int = 128,
+		seed_value: int = 3) -> ImageTexture:
+	var img: Image = Image.create(size, size, true, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 1, 1, 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 31 + kind
+	var fs: float = float(size)
+	var trunk_top: float = [0.80, 0.66, 0.55][clampi(kind, 0, 2)]
+	var trunk_w: float = [0.035, 0.045, 0.030][clampi(kind, 0, 2)]
+
+	# Canopy
+	for y in size:
+		var v: float = float(y) / fs                    # 0 top, 1 bottom
+		if v > trunk_top:
+			continue
+		var half: float = 0.0
+		if kind == 0:
+			# Conifer: widening downward with a sawtooth edge per tier. The
+			# proportions match the seven-tier LOD0 cone stack, so the swap at
+			# 400 m does not change the tree's outline.
+			var tiers: float = 7.0
+			var tier_f: float = v * tiers - floor(v * tiers)
+			half = pow(v / trunk_top, 0.72) * 0.48
+			half *= 0.93 + 0.07 * tier_f                # jagged branch tips
+		elif kind == 1:
+			# Broadleaf: overlapping lobes around a round crown.
+			var t2: float = (v / trunk_top - 0.48) * 2.0
+			half = sqrt(maxf(0.0, 1.0 - t2 * t2)) * 0.49
+			half *= 0.90 + 0.10 * sin(v * 26.0)
+		else:
+			# Birch: narrow, sparse, open crown.
+			var t3: float = (v / trunk_top - 0.42) * 2.0
+			half = sqrt(maxf(0.0, 1.0 - t3 * t3)) * 0.40
+			half *= 0.84 + 0.16 * sin(v * 34.0 + 1.1)
+		if half <= 0.002:
+			continue
+		var cx: float = 0.5 * fs
+		var x0: int = int(floor(cx - half * fs))
+		var x1: int = int(ceil(cx + half * fs))
+		for x in range(maxi(0, x0), mini(size, x1 + 1)):
+			var dx: float = absf((float(x) + 0.5 - cx) / maxf(half * fs, 0.001))
+			if dx > 1.0:
+				continue
+			# Ragged rim so the silhouette does not read as a solid cutout.
+			# Kept to the outermost tenth: any more and the whole tree thins
+			# out under mipmapping and disappears at range.
+			if dx > 0.90 and rng.randf() < (dx - 0.90) * 5.0:
+				continue
+			# Darker at the base and toward the centre: matches the ambient
+			# occlusion baked into the close-range canopies.
+			var shade: float = (0.55 + 0.45 * (1.0 - v / trunk_top)) * (0.82 + 0.18 * dx)
+			img.set_pixel(x, y, Color(shade, shade, shade, 1.0))
+
+	# Trunk
+	var tw: int = maxi(1, int(trunk_w * fs))
+	for y in range(int(trunk_top * fs * 0.72), size):
+		var cx2: int = size / 2
+		for x in range(cx2 - tw, cx2 + tw + 1):
+			if x < 0 or x >= size:
+				continue
+			var sh: float = 0.30 if kind != 2 else 0.72
+			img.set_pixel(x, y, Color(sh, sh, sh, 1.0))
+
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+
 static func leaf_cluster_mask(size: int = 128, seed_value: int = 2) -> ImageTexture:
 	var img: Image = Image.create(size, size, true, Image.FORMAT_RGBA8)
 	img.fill(Color(1, 1, 1, 0))

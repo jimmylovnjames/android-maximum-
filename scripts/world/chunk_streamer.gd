@@ -11,9 +11,9 @@ extends Node3D
 
 signal chunk_ready(coord: Vector2i)
 
-const REALIZE_BUDGET_USEC: int = 3200
+const REALIZE_BUDGET_BASE_USEC: int = 3200
 const UNLOAD_HYSTERESIS: int = 1
-const MAX_REALIZE_PER_FRAME: int = 2
+const MAX_REALIZE_BASE: int = 2
 
 var focus: Node3D = null
 var world_gen: WorldGen = null
@@ -22,6 +22,12 @@ var stream_radius: int = 4
 var collision_radius: int = GameConfig.COLLISION_RADIUS
 var cache_budget_bytes: int = 160 * 1048576
 var lod_bias: float = 1.0
+## How much of a frame realisation may spend, and how many chunks it may
+## finish. Both scale with the stress level: at ECO the priority is a steady
+## frame, at MELTDOWN the priority is getting the world in front of the player
+## as fast as the device can take it.
+var realize_budget_usec: int = REALIZE_BUDGET_BASE_USEC
+var realize_per_frame: int = MAX_REALIZE_BASE
 var view_distance: float = 800.0
 var veg_step: float = 1.6
 var prop_richness: float = 1.0
@@ -43,6 +49,13 @@ var _gen_veg_step: float = -1.0
 var _stats_gen_ms: float = 0.0
 var _generated_total: int = 0
 var _enabled: bool = true
+## Bytes held by chunks that are currently in the scene. The retention cache is
+## budgeted separately; active chunks are not, so at a large streaming radius
+## this is what would actually run a device out of memory.
+var _active_bytes: int = 0
+var active_budget_bytes: int = 512 * 1048576
+var _radius_penalty: int = 0
+var _penalty_cooldown: float = 0.0
 
 
 func configure(gen: WorldGen, mesh_lib: MeshLib, mat_lib: MaterialLib) -> void:
@@ -61,8 +74,14 @@ func apply_profile(profile: Dictionary) -> void:
 		GameConfig.MAX_STREAM_RADIUS)
 	lod_bias = float(profile.get("lod_bias", 1.0))
 	view_distance = float(profile.get("view_distance", 800.0))
+	realize_budget_usec = REALIZE_BUDGET_BASE_USEC + int(lod_bias * 1600.0)
+	realize_per_frame = MAX_REALIZE_BASE + int(lod_bias)
 	cache_budget_bytes = clampi(int(profile.get("cache_mb", 160)), 16,
 		GameConfig.MAX_CACHE_MB) * 1048576
+	# Live chunks get twice the retention budget. The retained set is data the
+	# player has already walked past; the active set is what is on screen, so
+	# it is allowed to be the larger of the two.
+	active_budget_bytes = cache_budget_bytes * 2
 	for c: Vector2i in active.keys():
 		(active[c] as WorldChunk).apply_lod(lod_bias, view_distance, lod_fade)
 	_trim_cache()
@@ -128,6 +147,7 @@ func last_gen_ms() -> float:
 func _process(_delta: float) -> void:
 	if not _enabled or world_gen == null:
 		return
+	_update_memory_guard(_delta)
 	_collect_results()
 	_realize_step()
 	var fc: Vector2i = focus_coord()
@@ -143,6 +163,8 @@ func _publish_counters() -> void:
 	PerformanceMonitor.set_counter("chunks_cached", _cache.size())
 	PerformanceMonitor.set_counter("chunk_cache_mb", cache_megabytes())
 	PerformanceMonitor.set_counter("stream_queue", pending_count())
+	PerformanceMonitor.set_counter("active_world_mb", active_megabytes())
+	PerformanceMonitor.set_counter("stream_radius", effective_radius())
 	var inst: int = 0
 	var by_category: Dictionary = {}
 	for c: Vector2i in active.keys():
@@ -161,7 +183,7 @@ func _publish_counters() -> void:
 # Desired set
 # -----------------------------------------------------------------------------
 func _refresh_desired(fc: Vector2i) -> void:
-	var keep_radius: int = stream_radius + UNLOAD_HYSTERESIS
+	var keep_radius: int = effective_radius() + UNLOAD_HYSTERESIS
 	var drop: Array[Vector2i] = []
 	for c: Vector2i in active.keys():
 		var d: Vector2i = c - fc
@@ -176,13 +198,43 @@ func _refresh_desired(fc: Vector2i) -> void:
 		(active[c] as WorldChunk).enable_collision(ring <= collision_radius)
 
 
+## Streaming radius after the memory guard has had its say.
+func effective_radius() -> int:
+	return maxi(2, stream_radius - _radius_penalty)
+
+
+func active_megabytes() -> float:
+	return float(_active_bytes) / 1048576.0
+
+
+func radius_penalty() -> int:
+	return _radius_penalty
+
+
+## Measured, not predicted: the guard reacts to the bytes chunks actually
+## turned out to need, which varies enormously between open forest and a
+## dense city block.
+func _update_memory_guard(delta: float) -> void:
+	if _penalty_cooldown > 0.0:
+		_penalty_cooldown -= delta
+		return
+	if _active_bytes > active_budget_bytes and _radius_penalty < stream_radius - 2:
+		_radius_penalty += 1
+		_penalty_cooldown = 2.5
+		EventBus.notify("STREAM: radius trimmed to %d (world data over budget)"
+			% effective_radius(), 3.0)
+	elif _active_bytes < int(float(active_budget_bytes) * 0.72) and _radius_penalty > 0:
+		_radius_penalty -= 1
+		_penalty_cooldown = 3.5
+
+
 func _dispatch(fc: Vector2i) -> void:
 	if _pending.size() >= _max_tasks:
 		return
 	var best: Vector2i = Vector2i.ZERO
 	var best_d: int = 1 << 30
 	var found: bool = false
-	for ring in stream_radius + 1:
+	for ring in effective_radius() + 1:
 		for dz in range(-ring, ring + 1):
 			for dx in range(-ring, ring + 1):
 				if maxi(absi(dx), absi(dz)) != ring:
@@ -259,6 +311,7 @@ func _spawn_chunk(d: ChunkData) -> void:
 	ch.setup(d, _mesh_lib, _mat_lib)
 	add_child(ch)
 	active[d.coord] = ch
+	_active_bytes += d.estimated_bytes()
 	_realizing.append(ch)
 
 
@@ -267,14 +320,14 @@ func _realize_step() -> void:
 		return
 	var finished: int = 0
 	var t0: int = Time.get_ticks_usec()
-	while not _realizing.is_empty() and finished < MAX_REALIZE_PER_FRAME:
-		if Time.get_ticks_usec() - t0 > REALIZE_BUDGET_USEC * MAX_REALIZE_PER_FRAME:
+	while not _realizing.is_empty() and finished < realize_per_frame:
+		if Time.get_ticks_usec() - t0 > realize_budget_usec * realize_per_frame:
 			return
 		var ch: WorldChunk = _realizing[0]
 		if not is_instance_valid(ch) or ch.data == null:
 			_realizing.pop_front()
 			continue
-		if not ch.step(REALIZE_BUDGET_USEC):
+		if not ch.step(realize_budget_usec):
 			return
 		_realizing.pop_front()
 		finished += 1
@@ -294,6 +347,8 @@ func _unload(c: Vector2i) -> void:
 	active.erase(c)
 	_realizing.erase(ch)
 	var d: ChunkData = ch.data
+	if d != null:
+		_active_bytes = maxi(0, _active_bytes - d.estimated_bytes())
 	ch.release()
 	ch.queue_free()
 	if d != null:
@@ -340,6 +395,7 @@ func reset() -> void:
 		ch.release()
 		ch.queue_free()
 	active.clear()
+	_active_bytes = 0
 	_realizing.clear()
 	for c: Vector2i in _pending.keys():
 		WorkerThreadPool.wait_for_task_completion(int(_pending[c]))

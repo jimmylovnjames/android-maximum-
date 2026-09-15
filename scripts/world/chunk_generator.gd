@@ -10,6 +10,12 @@ const BLOCK_CELL: float = 16.0
 const FLOOR_HEIGHT: float = 3.4
 const MAX_MODULES_PER_CHUNK: int = 520
 const PERM_PRIME: int = 104729
+## Sign palette. Deliberately narrow and saturated so a night skyline reads as
+## a city rather than a colour-noise field.
+const NEON_COLORS: Array[Color] = [
+	Color(1.00, 0.24, 0.30), Color(0.25, 0.85, 1.00), Color(1.00, 0.62, 0.15),
+	Color(0.60, 0.30, 1.00), Color(0.30, 1.00, 0.55), Color(1.00, 0.85, 0.30),
+]
 
 
 ## Bilinear sampler over the chunk's already-computed height grid. Terrain
@@ -328,11 +334,11 @@ static func _scatter_vegetation(gen: WorldGen, d: ChunkData, opts: Dictionary,
 	var tw: int = maxi(2, int(GameConfig.CHUNK_SIZE / tstep))
 	var ttotal: int = tw * tw
 	var pine: InstanceBatch = _batch(d, "pine",
-		PackedStringArray(["pine_l0", "pine_l1", "pine_l2"]), "tree", true)
+		PackedStringArray(["pine_l0", "pine_l1", "pine_l2", "pine_l3"]), "tree", true)
 	var broad: InstanceBatch = _batch(d, "broad",
-		PackedStringArray(["broad_l0", "broad_l1", "broad_l2"]), "tree", true)
+		PackedStringArray(["broad_l0", "broad_l1", "broad_l2", "broad_l3"]), "tree", true)
 	var birch: InstanceBatch = _batch(d, "birch",
-		PackedStringArray(["birch_l0", "birch_l1", "birch_l1"]), "tree", true)
+		PackedStringArray(["birch_l0", "birch_l1", "birch_l2", "birch_l2"]), "tree", true)
 	var dead: InstanceBatch = _batch(d, "dead_tree",
 		PackedStringArray(["dead_tree"]), "tree", true)
 	var bush: InstanceBatch = _batch(d, "bush",
@@ -424,6 +430,10 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 		PackedStringArray(["ac_unit"]), "prop", true, variant)
 	var masts: InstanceBatch = _batch(d, "antenna",
 		PackedStringArray(["antenna"]), "detail", false, variant)
+	var signs: InstanceBatch = _batch(d, "sign",
+		PackedStringArray(["sign"]), "prop", false, variant)
+	var hoardings: InstanceBatch = _batch(d, "hoarding",
+		PackedStringArray(["hoarding"]), "prop", true, variant)
 
 	var cells: int = int(GameConfig.CHUNK_SIZE / BLOCK_CELL)
 	var module_count: int = 0
@@ -462,9 +472,18 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			if rl > 0.3:
 				col = col.lerp(Color(0.22, 0.14, 0.13), rl * 0.7)
 
+			# Podium: the lowest floors of a tall building step out. Without it
+			# every tower is an unbroken extrusion and the street has no base.
+			var podium: int = 0
+			if floors >= 6:
+				podium = 2 if WorldGen.hash_f(int(cx), int(cz), 55) < 0.6 else 3
+			var podium_scale: float = WorldGen.hash_range(int(cx), int(cz), 56, 1.12, 1.3)
+
 			for f in floors:
 				# Slight setback on tall towers.
 				var shrink: float = 1.0 - float(f) / float(maxi(floors, 1)) * 0.18
+				if f < podium:
+					shrink = podium_scale
 				mods.add(
 					Transform3D(
 						Basis.IDENTITY.scaled(Vector3(w * shrink, FLOOR_HEIGHT, dp * shrink)),
@@ -473,6 +492,40 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 					col, Color(seed_f, 0.0, 0.0, 0.0)
 				)
 				module_count += 1
+
+			# Lit signage. Dense in the city, industrial and REDLINE bands;
+			# absent in the settlement, where it would look wrong.
+			if zone >= GameConfig.Zone.TOWN:
+				var sign_count: int = 1 + int(WorldGen.hash_range(
+					int(cx), int(cz), 57, 0.0, 2.9))
+				for si in sign_count:
+					if WorldGen.hash_f(int(cx) + si * 13, int(cz), 58) > 0.55:
+						continue
+					var face: int = WorldGen.hash_i(int(cx) + si, int(cz), 59) % 4
+					var yaw_s: float = float(face) * PI * 0.5
+					var out_w: float = (w if face % 2 == 0 else dp) * podium_scale * 0.5 + 0.2
+					var off := Vector3(sin(yaw_s) * out_w, 0.0, cos(yaw_s) * out_w)
+					var sy: float = base_y + FLOOR_HEIGHT * (
+						1.3 + WorldGen.hash_range(int(cx) + si, int(cz), 60,
+							0.0, float(maxi(floors - 2, 1))))
+					var neon: Color = NEON_COLORS[
+						WorldGen.hash_i(int(cx) + si * 7, int(cz), 61) % NEON_COLORS.size()]
+					signs.add_simple(
+						Vector3(cx - ox + off.x, sy, cz - oz + off.z), yaw_s,
+						Vector3.ONE * WorldGen.hash_range(int(cx) + si, int(cz), 62,
+							0.7, 1.35),
+						neon,
+						# y = emission strength, w = use my own colour.
+						Color(0.0, 1.0, 0.25, 1.0))
+
+			if floors >= 7 and WorldGen.hash_f(int(cx), int(cz), 63) < 0.35:
+				var hcol: Color = NEON_COLORS[
+					WorldGen.hash_i(int(cx), int(cz), 64) % NEON_COLORS.size()]
+				hoardings.add_simple(
+					Vector3(cx - ox, base_y + float(floors) * FLOOR_HEIGHT + 1.0, cz - oz),
+					WorldGen.hash_range(int(cx), int(cz), 65, 0.0, TAU),
+					Vector3.ONE * WorldGen.hash_range(int(cx), int(cz), 66, 0.8, 1.4),
+					hcol, Color(0.0, 0.9, 0.3, 1.0))
 
 			var top_y: float = base_y + float(floors) * FLOOR_HEIGHT
 			var tw: float = w * (1.0 - 0.18 + 0.18 / float(maxi(floors, 1)))
@@ -508,6 +561,8 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 		PackedStringArray(["streetlight"]), "prop", true, variant)
 	var marks: InstanceBatch = _batch(d, "road_mark",
 		PackedStringArray(["road_mark"]), "detail", false, variant)
+	var bollards: InstanceBatch = _batch(d, "bollard",
+		PackedStringArray(["bollard"]), "detail", false, variant)
 	var steps: int = int(GameConfig.CHUNK_SIZE / 8.0)
 	for s in steps:
 		var t: float = (float(s) + 0.5) * 8.0
@@ -539,6 +594,18 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 				marks.add_simple(Vector3(rp.x - ox, y + 0.04, rp.z - oz),
 					0.0 if axis == 0 else PI * 0.5, Vector3.ONE,
 					Color(0.85, 0.82, 0.6), Color(0.0, 0.08, 0.7, 0.0))
+			if urban > 0.45:
+				for side_i in 2:
+					var bs: float = 1.0 if side_i == 0 else -1.0
+					var bx: float = rp.x + (0.0 if axis == 0 else bs * 6.6)
+					var bz: float = rp.z + (bs * 6.6 if axis == 0 else 0.0)
+					if bx < ox or bx >= ox + GameConfig.CHUNK_SIZE:
+						continue
+					if bz < oz or bz >= oz + GameConfig.CHUNK_SIZE:
+						continue
+					bollards.add_simple(
+						Vector3(bx - ox, field.h(bx, bz), bz - oz), 0.0, Vector3.ONE,
+						Color(0.34, 0.35, 0.37), Color(0.0, 0.05, 0.55, 0.0))
 
 
 # -----------------------------------------------------------------------------
@@ -555,6 +622,8 @@ static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary,
 		PackedStringArray(["rock_l0", "rock_l1"]), "prop", true, variant)
 	var boulders: InstanceBatch = _batch(d, "boulder",
 		PackedStringArray(["boulder"]), "prop", true, variant)
+	var outcrops: InstanceBatch = _batch(d, "outcrop",
+		PackedStringArray(["outcrop0", "outcrop1"]), "prop", true)
 	var crates: InstanceBatch = _batch(d, "crate",
 		PackedStringArray(["crate"]), "prop", true, variant)
 	var barrels: InstanceBatch = _batch(d, "barrel",
@@ -596,6 +665,16 @@ static func _scatter_props(gen: WorldGen, d: ChunkData, opts: Dictionary,
 
 		if on_rd:
 			continue
+
+		# Steep ground gets rock formations. Trees already refuse slopes above
+		# 0.55, so without this the steepest terrain is the emptiest.
+		var slope: float = field.slope(wx, wz)
+		if slope > 0.34 and zone <= GameConfig.Zone.INDUSTRIAL:
+			if WorldGen.hash_f(int(wx), int(wz), 72) < (slope - 0.34) * 1.9 * richness:
+				outcrops.add_simple(lp, yaw,
+					Vector3.ONE * WorldGen.hash_range(int(wx), int(wz), 73, 0.65, 1.9),
+					Color(0.92, 0.94, 0.96), Color(0.0, 0.0, 0.88, 0.0))
+				continue
 
 		if zone <= GameConfig.Zone.FOREST:
 			if roll < 0.055 * richness:

@@ -17,6 +17,9 @@ uniform float macro_scale = 0.012;
 uniform float rock_slope = 0.62;
 uniform float rock_blend = 0.18;
 uniform float water_level = -6.0;
+uniform vec4 foam_color : source_color = vec4(0.82, 0.86, 0.88, 1.0);
+uniform float foam_width = 0.9;
+uniform sampler2D foam_noise : source_color, filter_linear_mipmap, repeat_enable;
 uniform float roughness_base = 0.94;
 uniform float detail_strength = 0.36;
 uniform float normal_strength = 0.85;
@@ -62,6 +65,16 @@ void fragment() {
 	float shore = 1.0 - smoothstep(water_level, water_level + 3.5, v_world.y);
 	base = mix(base, sand_color.rgb, shore * 0.75 * organic);
 
+	// Shoreline. The mobile renderer cannot read depth, so the foam band is
+	// computed from the vertex's own height against the water plane and
+	// animated with a scrolling noise lookup instead of an intersection test.
+	float tide = (texture(foam_noise, v_world.xz * 0.035
+		+ vec2(TIME * 0.011, TIME * -0.007)).r - 0.5) * 0.55;
+	float band = 1.0 - smoothstep(0.0, foam_width, abs(v_world.y - water_level - tide));
+	float surf = texture(foam_noise, v_world.xz * 0.22 + vec2(TIME * 0.05, 0.0)).g;
+	band *= 0.45 + 0.55 * surf;
+	base = mix(base, foam_color.rgb, clamp(band, 0.0, 1.0) * 0.8);
+
 	// Rain darkens and slickens the ground.
 	float wet = clamp(redline_wetness, 0.0, 1.0);
 	base = mix(base, base * 0.55 + wet_color.rgb * 0.25, wet * 0.7);
@@ -79,7 +92,9 @@ void fragment() {
 	base *= mix(1.0, 0.78, clamp(v_slope * 1.4, 0.0, 1.0));
 
 	ALBEDO = base;
-	ROUGHNESS = mix(roughness_base, 0.28, wet * 0.8) * mix(1.0, 0.82, rock_mask)
+	// Ground within the tide band stays wet whatever the weather.
+	float shore_wet = max(wet, clamp(band * 1.2, 0.0, 1.0));
+	ROUGHNESS = mix(roughness_base, 0.22, shore_wet * 0.85) * mix(1.0, 0.82, rock_mask)
 		* mix(0.86, 1.0, organic);
 	SPECULAR = mix(0.18, 0.45, wet);
 	METALLIC = 0.0;

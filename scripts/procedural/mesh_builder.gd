@@ -236,12 +236,18 @@ func add_blob(center: Vector3, radius: Vector3, subdiv: int, col: Color,
 
 
 ## Two crossed vertical quads -- the classic cheap foliage/grass card.
+## `normal_override` replaces the card's own facing normal. Billboard impostors
+## want an upward normal so they take the same ambient and sun term as the
+## canopy they stand in for, instead of lighting like a vertical wall.
 func add_cross_card(center: Vector3, width: float, height: float, col_bottom: Color,
-		col_top: Color, yaw: float = 0.0) -> void:
+		col_top: Color, yaw: float = 0.0,
+		normal_override: Vector3 = Vector3.ZERO) -> void:
 	for k in 2:
 		var a: float = yaw + (0.0 if k == 0 else PI * 0.5)
 		var dir: Vector3 = Vector3(cos(a), 0.0, sin(a)) * width * 0.5
 		var n: Vector3 = Vector3(-sin(a), 0.0, cos(a))
+		if normal_override != Vector3.ZERO:
+			n = normal_override.normalized()
 		var i0: int = add_vertex(center - dir, n, Vector2(0.0, 1.0), col_bottom)
 		var i1: int = add_vertex(center + dir, n, Vector2(1.0, 1.0), col_bottom)
 		var i2: int = add_vertex(center + dir + Vector3.UP * height, n, Vector2(1.0, 0.0), col_top)

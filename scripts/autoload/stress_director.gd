@@ -51,19 +51,19 @@ const TABLE: Array[Dictionary] = [
 		"destructible_stacks": 18, "particle_systems": 34, "grass_multiplier": 2.1,
 	},
 	{   # 4 REDLINE
-		"npc_count": 760, "enemy_count": 160, "vehicle_count": 130, "rigid_bodies": 600,
-		"veg_density": 2.3, "particle_budget": 24000, "omni_lights": 72,
-		"shadow_distance": 220.0, "stream_radius": 7, "lod_bias": 2.0,
-		"cache_mb": 1100, "ai_hz": 20.0, "debris_budget": 380, "weather_complexity": 4,
-		"view_distance": 1850.0, "full_npc_ratio": 0.44, "building_detail": 1.6,
+		"npc_count": 1050, "enemy_count": 220, "vehicle_count": 175, "rigid_bodies": 780,
+		"veg_density": 2.5, "particle_budget": 30000, "omni_lights": 84,
+		"shadow_distance": 250.0, "stream_radius": 8, "lod_bias": 2.3,
+		"cache_mb": 2400, "ai_hz": 20.0, "debris_budget": 500, "weather_complexity": 4,
+		"view_distance": 2300.0, "full_npc_ratio": 0.44, "building_detail": 1.6,
 		"destructible_stacks": 28, "particle_systems": 48, "grass_multiplier": 2.8,
 	},
 	{   # 5 MELTDOWN
-		"npc_count": 1200, "enemy_count": 240, "vehicle_count": 200, "rigid_bodies": 860,
-		"veg_density": 3.0, "particle_budget": 40000, "omni_lights": 92,
-		"shadow_distance": 280.0, "stream_radius": 8, "lod_bias": 2.4,
-		"cache_mb": 1900, "ai_hz": 24.0, "debris_budget": 560, "weather_complexity": 4,
-		"view_distance": 2400.0, "full_npc_ratio": 0.5, "building_detail": 2.0,
+		"npc_count": 1800, "enemy_count": 340, "vehicle_count": 280, "rigid_bodies": 1100,
+		"veg_density": 3.2, "particle_budget": 52000, "omni_lights": 96,
+		"shadow_distance": 320.0, "stream_radius": 10, "lod_bias": 2.8,
+		"cache_mb": 4096, "ai_hz": 24.0, "debris_budget": 760, "weather_complexity": 4,
+		"view_distance": 3200.0, "full_npc_ratio": 0.5, "building_detail": 2.2,
 		"destructible_stacks": 40, "particle_systems": 62, "grass_multiplier": 3.6,
 	},
 ]
@@ -224,7 +224,9 @@ func _recompute() -> void:
 	var cache_target: float = minf(float(base["cache_mb"]), float(q.get("cache_mb", 256)))
 	if bool(GameConfig.settings.get("high_memory_mode", false)):
 		cache_target *= 2.5
-	e["cache_mb"] = _capi(cache_target, GameConfig.MAX_CACHE_MB)
+	# Whatever the table asks for, never exceed what this device should hold.
+	e["cache_mb"] = _capi(cache_target,
+		AdaptiveQualityManager.device_cache_budget_mb())
 	e["ai_hz"] = clampf(float(base["ai_hz"]), 2.0, 40.0)
 	e["weather_complexity"] = int(base["weather_complexity"])
 	e["full_npc_ratio"] = clampf(float(base["full_npc_ratio"]), 0.05, 1.0)

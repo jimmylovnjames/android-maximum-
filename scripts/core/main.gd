@@ -37,6 +37,7 @@ var _force_quality: int = -1
 var _start_time: float = -1.0
 var _selftest: bool = false
 var _mesh_gallery: bool = false
+var _gallery_filter: String = ""
 var _godmode: bool = false
 var _show_menu: bool = false
 var _safety_off: bool = false
@@ -108,6 +109,7 @@ func _ready() -> void:
 		MeshLib.reset()
 		MeshLib.get_instance()
 		var gallery := MeshGallery.new()
+		gallery.filter = _gallery_filter
 		add_child(gallery)
 		gallery.build()
 		_started = true
@@ -194,6 +196,9 @@ func _parse_cli() -> void:
 			_selftest = true
 		elif arg == "--mesh-gallery":
 			_mesh_gallery = true
+		elif arg.begins_with("--gallery-filter="):
+			_mesh_gallery = true
+			_gallery_filter = arg.split("=", true, 1)[1]
 		elif arg == "--godmode":
 			_godmode = true
 		elif arg == "--show-menu":

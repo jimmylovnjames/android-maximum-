@@ -37,18 +37,18 @@ const PRESETS: Array[Dictionary] = [
 	{   # ULTRA
 		"render_scale": 1.0, "msaa": 2, "shadow_atlas": 4096, "dir_shadow_size": 4096,
 		"soft_shadow_quality": 2, "shadow_distance": 165.0, "shadow_splits": 3,
-		"positional_shadows": true, "veg_mult": 1.35, "view_mult": 1.3,
-		"npc_mult": 1.25, "traffic_mult": 1.25, "physics_mult": 1.25,
-		"particle_mult": 1.3, "light_mult": 1.3, "cache_mb": 640, "lod_bias": 1.35,
-		"stream_bonus": 1, "glow": true, "fog_detail": 2,
+		"positional_shadows": true, "veg_mult": 1.5, "view_mult": 1.5,
+		"npc_mult": 1.3, "traffic_mult": 1.3, "physics_mult": 1.3,
+		"particle_mult": 1.35, "light_mult": 1.35, "cache_mb": 1024, "lod_bias": 1.5,
+		"stream_bonus": 2, "glow": true, "fog_detail": 2,
 	},
 	{   # INSANE -- intended for Snapdragon 8 Gen 3 class hardware
 		"render_scale": 1.15, "msaa": 2, "shadow_atlas": 4096, "dir_shadow_size": 4096,
 		"soft_shadow_quality": 3, "shadow_distance": 240.0, "shadow_splits": 4,
-		"positional_shadows": true, "veg_mult": 1.9, "view_mult": 1.7,
-		"npc_mult": 1.6, "traffic_mult": 1.6, "physics_mult": 1.6,
-		"particle_mult": 1.7, "light_mult": 1.7, "cache_mb": 1536, "lod_bias": 1.8,
-		"stream_bonus": 2, "glow": true, "fog_detail": 2,
+		"positional_shadows": true, "veg_mult": 2.4, "view_mult": 2.1,
+		"npc_mult": 1.9, "traffic_mult": 1.9, "physics_mult": 1.8,
+		"particle_mult": 1.9, "light_mult": 1.9, "cache_mb": 3072, "lod_bias": 2.2,
+		"stream_bonus": 3, "glow": true, "fog_detail": 2,
 	},
 ]
 
@@ -130,6 +130,30 @@ func detect_preset() -> int:
 
 func detect_reason() -> String:
 	return _detect_reason
+
+
+## Ceiling on retained world data for *this* device, in MB.
+##
+## A fixed per-preset number is wrong in both directions: it wastes a 24 GB
+## phone and it gets a 4 GB one killed. Android never hands a process the whole
+## machine, so this takes a conservative slice of physical RAM and the preset's
+## own figure is then clamped to it.
+func device_cache_budget_mb() -> int:
+	var mi: Dictionary = OS.get_memory_info()
+	var phys_mb: float = float(mi.get("physical", -1)) / 1048576.0
+	if phys_mb <= 0.0:
+		return 256                      # platform will not say; stay modest
+	var share: float = 0.20 if OS.has_feature("mobile") else 0.28
+	return clampi(int(phys_mb * share), 96, GameConfig.MAX_CACHE_MB)
+
+
+func cache_budget_note() -> String:
+	var mi: Dictionary = OS.get_memory_info()
+	var phys_mb: float = float(mi.get("physical", -1)) / 1048576.0
+	if phys_mb <= 0.0:
+		return "physical RAM not reported; cache held at 256 MB"
+	return "%.0f MB physical -> %d MB world cache ceiling" % [
+		phys_mb, device_cache_budget_mb()]
 
 
 func preset_name() -> String:
