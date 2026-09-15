@@ -17,6 +17,7 @@ global uniform float redline_night;
 global uniform float redline_wetness;
 
 varying vec3 v_world;
+varying flat vec2 v_tex_origin;
 // Per-instance constants: flat, so no interpolation error reaches the step()
 // comparisons below.
 varying flat float v_emis;
@@ -25,6 +26,10 @@ varying flat float v_self_lit;
 
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// Wrapped instance origin plus the local vertex: small numbers, but still
+	// a different patch of the texture per instance.
+	vec2 o = MODEL_MATRIX[3].xz;
+	v_tex_origin = o - floor(o / 32.0) * 32.0;
 	v_emis = INSTANCE_CUSTOM.y;
 	v_rough = INSTANCE_CUSTOM.z;
 	// w flags an instance that glows in its own colour rather than the batch
@@ -34,7 +39,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec3 tex = texture(surface_tex, v_world.xz * tex_scale + UV * 0.5).rgb;
+	vec3 tex = texture(surface_tex, (v_tex_origin + VERTEX.xz) * tex_scale + UV * 0.5).rgb;
 	vec3 base = COLOR.rgb * mix(0.82, 1.18, tex.r);
 	ALBEDO = base;
 	float wet = clamp(redline_wetness, 0.0, 1.0);

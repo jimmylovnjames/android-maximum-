@@ -429,9 +429,31 @@ func _build_urban() -> void:
 	meshes["bollard"] = bollard.commit(null, _mat.prop)
 
 	var road_mark := MeshBuilder.new()
-	road_mark.add_box(Vector3(-1.5, 0.0, -0.14), Vector3(3.0, 0.03, 0.28),
+	road_mark.add_box(Vector3(-1.8, 0.0, -0.15), Vector3(3.6, 0.03, 0.30),
 		Color(0.82, 0.80, 0.62))
 	meshes["road_mark"] = road_mark.commit(null, _mat.prop)
+
+	# Kerb and footway. Both are 8 m long to match the road furniture step, so
+	# consecutive instances tile into a continuous edge rather than a dashed
+	# one. Local +X runs along the carriageway and local +Z points away from
+	# it, which is the convention the placement yaw assumes.
+	var kerb := MeshBuilder.new()
+	kerb.add_box(Vector3(-4.0, 0.0, -0.02), Vector3(8.0, 0.155, 0.34),
+		Color(0.56, 0.55, 0.53))
+	# A darker face on the carriageway side reads as the shadowed edge even
+	# with no local light on it.
+	kerb.add_box(Vector3(-4.0, 0.0, -0.06), Vector3(8.0, 0.12, 0.05),
+		Color(0.34, 0.335, 0.33))
+	meshes["kerb"] = kerb.commit(null, _mat.prop)
+
+	var footway := MeshBuilder.new()
+	footway.add_box(Vector3(-4.0, 0.0, 0.3), Vector3(8.0, 0.14, 3.1),
+		Color(0.50, 0.495, 0.485))
+	# Flag joints: two shallow grooves, enough to break up 8 m of flat slab.
+	for gi in 3:
+		footway.add_box(Vector3(-4.0 + float(gi + 1) * 2.0 - 0.04, 0.14, 0.32),
+			Vector3(0.08, 0.008, 3.06), Color(0.40, 0.40, 0.39))
+	meshes["footway"] = footway.commit(null, _mat.prop)
 
 
 func _build_props() -> void:

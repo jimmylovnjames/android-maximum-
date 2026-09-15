@@ -6,13 +6,16 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // different scales break up tiling without costing screen-space effects the
 // Godot mobile renderer cannot run.
 
-uniform sampler2D detail_tex : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D macro_tex : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D detail_normal : hint_normal, filter_linear_mipmap, repeat_enable;
+// Anisotropic, not plain mipmapped. Ground is almost always seen at a grazing
+// angle, so isotropic mip selection picks a level for the *compressed* axis
+// and the surface breaks into radial streaks running towards the camera.
+uniform sampler2D detail_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D macro_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D detail_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec4 rock_color : source_color = vec4(0.32, 0.30, 0.29, 1.0);
 uniform vec4 sand_color : source_color = vec4(0.40, 0.355, 0.255, 1.0);
 uniform vec4 wet_color : source_color = vec4(0.20, 0.22, 0.20, 1.0);
-uniform float detail_scale = 0.18;
+uniform float detail_scale = 0.25;
 uniform float macro_scale = 0.012;
 uniform float rock_slope = 0.62;
 uniform float rock_blend = 0.18;
@@ -24,8 +27,8 @@ uniform float roughness_base = 0.94;
 uniform float detail_strength = 0.20;
 uniform float normal_strength = 0.85;
 uniform float macro_variation = 0.26;
-uniform float detail_fade_begin = 12.0;
-uniform float detail_fade_end = 55.0;
+uniform float detail_fade_begin = 9.0;
+uniform float detail_fade_end = 38.0;
 
 uniform float sky_glow_energy = 0.13;
 uniform vec3 sky_glow_color : source_color = vec3(1.0, 0.68, 0.42);
@@ -35,15 +38,24 @@ global uniform float redline_urban_night;
 
 varying vec3 v_world;
 varying float v_slope;
+// Detail UVs are built from the chunk-LOCAL vertex position, not the world
+// position. A world X of ~1450 times a 0.18 scale gives a UV around 260, and
+// float32 has so few mantissa bits left at that magnitude that the lookup
+// jitters by a couple of texels per pixel -- which renders as a fixed dither
+// pattern across the whole ground plane. Chunk-local XZ stays in 0..64, and
+// because the tiling period (1/0.25 = 4 m) divides 64 exactly, the texture
+// still runs continuously across chunk seams.
+varying vec2 v_detail_uv;
 
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_detail_uv = VERTEX.xz * detail_scale;
 	vec3 wn = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_slope = 1.0 - clamp(wn.y, 0.0, 1.0);
 }
 
 void fragment() {
-	vec2 duv = v_world.xz * detail_scale;
+	vec2 duv = v_detail_uv;
 	vec2 muv = v_world.xz * macro_scale;
 	// VERTEX is view-space in the fragment stage, so this is the distance to
 	// the camera. Metre-scale detail and the normal map are only meaningful
@@ -51,6 +63,19 @@ void fragment() {
 	// the whole ground plane.
 	float near_detail = 1.0 - smoothstep(detail_fade_begin, detail_fade_end,
 		length(VERTEX));
+	// Also fade it where the ground is edge-on. Anisotropic filtering is the
+	// proper answer to grazing-angle minification and it is requested on the
+	// samplers, but it is not guaranteed on every driver, and detail this fine
+	// carries no information at a glancing angle anyway.
+	// Grazing-angle fade, applied to every texture term below. Anisotropic
+	// filtering is the proper answer to grazing-angle minification and it is
+	// requested on the samplers, but it is not guaranteed on every driver --
+	// and detail this fine carries no information edge-on anyway. Measured:
+	// with the texture terms removed entirely the horizontal roughness of a
+	// road surface drops from 3.45 to 0.48, so this is where the streaking
+	// across the ground plane was coming from.
+	float graze = smoothstep(0.10, 0.42, abs(dot(normalize(-VERTEX), NORMAL)));
+	near_detail *= graze;
 
 	vec3 detail = texture(detail_tex, duv).rgb;
 	vec3 macro = texture(macro_tex, muv).rgb;
@@ -59,7 +84,10 @@ void fragment() {
 	// COLOR.a is how built-up this vertex is. Organic hue variation is for
 	// soil and grass; concrete and asphalt only get brightness variation.
 	float organic = 1.0 - COLOR.a;
-	float m = macro.r;
+	// Macro variation tiles every ~83 m, which is exactly the frequency that
+	// compresses into radial streaks towards the horizon, so it takes the
+	// grazing fade too.
+	float m = mix(0.5, macro.r, graze);
 	base *= mix(1.0 - macro_variation * mix(0.45, 1.0, organic),
 		1.0 + macro_variation * 0.75 * mix(0.45, 1.0, organic), m);
 	base = mix(base, base * vec3(1.18, 1.04, 0.78),
@@ -85,7 +113,7 @@ void fragment() {
 	float tide = (texture(foam_noise, v_world.xz * 0.035
 		+ vec2(TIME * 0.011, TIME * -0.007)).r - 0.5) * 0.55;
 	float band = 1.0 - smoothstep(0.0, foam_width, abs(v_world.y - water_level - tide));
-	float surf = texture(foam_noise, v_world.xz * 0.22 + vec2(TIME * 0.05, 0.0)).g;
+	float surf = texture(foam_noise, duv * 0.5 + vec2(TIME * 0.05, 0.0)).g;
 	band *= 0.45 + 0.55 * surf;
 	base = mix(base, foam_color.rgb, clamp(band, 0.0, 1.0) * 0.8);
 
@@ -96,8 +124,8 @@ void fragment() {
 	// Surface normal detail at two scales. A single lookup tiles visibly as
 	// diagonal streaking across open ground; crossing two rates breaks it up
 	// for one extra sample.
-	vec3 n_near = texture(detail_normal, duv * 0.9).xyz;
-	vec3 n_far = texture(detail_normal, duv * 0.21 + vec2(0.37, 0.11)).xyz;
+	vec3 n_near = texture(detail_normal, duv).xyz;
+	vec3 n_far = texture(detail_normal, duv * 0.25 + vec2(0.375, 0.125)).xyz;
 	NORMAL_MAP = normalize(mix(n_near, n_far, 0.45) * 2.0 - 1.0) * 0.5 + 0.5;
 	// Paved ground is smoother than soil.
 	NORMAL_MAP_DEPTH = normal_strength * mix(1.0, 0.45, wet)

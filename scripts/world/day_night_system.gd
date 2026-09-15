@@ -43,8 +43,14 @@ func setup(mat: MaterialLib) -> void:
 	sun.directional_shadow_split_1 = 0.06
 	sun.directional_shadow_split_2 = 0.16
 	sun.directional_shadow_split_3 = 0.42
-	sun.shadow_bias = 0.028
-	sun.shadow_normal_bias = 1.1
+	# Both of these were below Godot's own defaults (0.1 / 2.0). On a large
+	# flat surface seen at a grazing angle -- which is what a road is, most of
+	# the time -- that under-biasing produced shadow acne as radial streaks
+	# converging on the camera. Verified by bisection: with every texture term
+	# in the terrain shader replaced by flat vertex colour the streaks were
+	# still there, so they were never a texture-filtering problem.
+	sun.shadow_bias = 0.06
+	sun.shadow_normal_bias = 2.4
 	# A non-zero angular diameter softens shadow edges with distance, which is
 	# most of what sells outdoor lighting and costs nothing extra.
 	sun.light_angular_distance = 0.65

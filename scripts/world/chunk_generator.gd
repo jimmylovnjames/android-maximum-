@@ -602,6 +602,13 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 		PackedStringArray(["road_mark"]), "detail", false, variant)
 	var bollards: InstanceBatch = _batch(d, "bollard",
 		PackedStringArray(["bollard"]), "detail", false, variant)
+	# Kerb and footway define where the carriageway ends. Without them the road
+	# is just a differently tinted patch of the same ground plane and the city
+	# reads as boxes standing on an open field.
+	var kerbs: InstanceBatch = _batch(d, "kerb",
+		PackedStringArray(["kerb"]), "prop", false, variant)
+	var footways: InstanceBatch = _batch(d, "footway",
+		PackedStringArray(["footway"]), "prop", false, variant)
 	var steps: int = int(GameConfig.CHUNK_SIZE / 8.0)
 	for s in steps:
 		var t: float = (float(s) + 0.5) * 8.0
@@ -621,6 +628,33 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 			if not gen.on_road(rp.x, rp.z):
 				continue
 			var y: float = field.h(rp.x, rp.z)
+
+			# Kerb line, skipped through an intersection so the two
+			# carriageways join instead of being walled off from each other.
+			var across: bool = (gen.on_road(rp.x, rp.z + WorldGen.ROAD_HALF_WIDTH + 2.0)
+				if axis == 0
+				else gen.on_road(rp.x + WorldGen.ROAD_HALF_WIDTH + 2.0, rp.z))
+			if not across:
+				for ki in 2:
+					var ks: float = 1.0 if ki == 0 else -1.0
+					var kyaw: float = (0.0 if axis == 0 else PI * 0.5) \
+						+ (0.0 if ks > 0.0 else PI)
+					var kx: float = rp.x + (0.0 if axis == 0
+						else ks * WorldGen.ROAD_HALF_WIDTH)
+					var kz: float = rp.z + (ks * WorldGen.ROAD_HALF_WIDTH
+						if axis == 0 else 0.0)
+					if kx < ox or kx >= ox + GameConfig.CHUNK_SIZE:
+						continue
+					if kz < oz or kz >= oz + GameConfig.CHUNK_SIZE:
+						continue
+					var ky: float = field.h(kx, kz)
+					kerbs.add_simple(Vector3(kx - ox, ky, kz - oz), kyaw,
+						Vector3.ONE, Color(0.78, 0.77, 0.75),
+						Color(0.0, 0.0, 0.65, 0.0))
+					footways.add_simple(Vector3(kx - ox, ky, kz - oz), kyaw,
+						Vector3.ONE, Color(0.74, 0.735, 0.72),
+						Color(0.0, 0.0, 0.7, 0.0))
+
 			if s % 3 == 0:
 				var side: float = 1.0 if (s % 6 == 0) else -1.0
 				var lx: float = rp.x + (0.0 if axis == 0 else side * 7.2)
@@ -629,15 +663,15 @@ static func _build_structures(gen: WorldGen, d: ChunkData, opts: Dictionary,
 					(0.0 if axis == 0 else PI * 0.5) + (0.0 if side > 0.0 else PI),
 					Vector3.ONE, Color(0.3, 0.31, 0.33), Color(0.0, 0.0, 0.35, 0.0))
 				d.light_spots.push_back(Vector3(lx, field.h(lx, lz) + 6.0, lz))
-			if s % 2 == 0:
+			if true:
 				marks.add_simple(Vector3(rp.x - ox, y + 0.04, rp.z - oz),
 					0.0 if axis == 0 else PI * 0.5, Vector3.ONE,
 					Color(0.85, 0.82, 0.6), Color(0.0, 0.08, 0.7, 0.0))
 			if urban > 0.45:
 				for side_i in 2:
 					var bs: float = 1.0 if side_i == 0 else -1.0
-					var bx: float = rp.x + (0.0 if axis == 0 else bs * 6.6)
-					var bz: float = rp.z + (bs * 6.6 if axis == 0 else 0.0)
+					var bx: float = rp.x + (0.0 if axis == 0 else bs * 7.0)
+					var bz: float = rp.z + (bs * 7.0 if axis == 0 else 0.0)
 					if bx < ox or bx >= ox + GameConfig.CHUNK_SIZE:
 						continue
 					if bz < oz or bz >= oz + GameConfig.CHUNK_SIZE:
